@@ -1,0 +1,176 @@
+{
+  "crawlAnt": {
+    "file": "assets/img/crawlAnt.png",
+    "w": 24,
+    "h": 24,
+    "from": "crawlers.sprites.js"
+  },
+  "roach": {
+    "file": "assets/img/roach.png",
+    "w": 24,
+    "h": 24,
+    "from": "crawlers.sprites.js"
+  },
+  "crawlLadybug": {
+    "file": "assets/img/crawlLadybug.png",
+    "w": 24,
+    "h": 24,
+    "from": "crawlers.sprites.js"
+  },
+  "spider": {
+    "file": "assets/img/spider.png",
+    "w": 24,
+    "h": 24,
+    "from": "crawlers.sprites.js"
+  },
+  "groundBeetle": {
+    "file": "assets/img/groundBeetle.png",
+    "w": 24,
+    "h": 24,
+    "from": "crawlers.sprites.js"
+  },
+  "centipede": {
+    "file": "assets/img/centipede.png",
+    "w": 24,
+    "h": 24,
+    "from": "crawlers.sprites.js"
+  },
+  "termite": {
+    "file": "assets/img/termite.png",
+    "w": 24,
+    "h": 24,
+    "from": "crawlers.sprites.js"
+  },
+  "weevil": {
+    "file": "assets/img/weevil.png",
+    "w": 24,
+    "h": 24,
+    "from": "crawlers.sprites.js"
+  },
+  "ant": {
+    "file": "assets/img/ant.png",
+    "w": 32,
+    "h": 32,
+    "from": "generators.sprites.js"
+  },
+  "aphid": {
+    "file": "assets/img/aphid.png",
+    "w": 32,
+    "h": 32,
+    "from": "generators.sprites.js"
+  },
+  "ladybug": {
+    "file": "assets/img/ladybug.png",
+    "w": 32,
+    "h": 32,
+    "from": "generators.sprites.js"
+  },
+  "cricket": {
+    "file": "assets/img/cricket.png",
+    "w": 32,
+    "h": 32,
+    "from": "generators.sprites.js"
+  },
+  "stagBeetle": {
+    "file": "assets/img/stagBeetle.png",
+    "w": 32,
+    "h": 32,
+    "from": "generators.sprites.js"
+  },
+  "firefly": {
+    "file": "assets/img/firefly.png",
+    "w": 32,
+    "h": 32,
+    "from": "generators.sprites.js"
+  },
+  "mantis": {
+    "file": "assets/img/mantis.png",
+    "w": 32,
+    "h": 32,
+    "from": "generators.sprites.js"
+  },
+  "cicada": {
+    "file": "assets/img/cicada.png",
+    "w": 32,
+    "h": 32,
+    "from": "generators.sprites.js"
+  },
+  "queenBee": {
+    "file": "assets/img/queenBee.png",
+    "w": 32,
+    "h": 32,
+    "from": "generators.sprites.js"
+  },
+  "heroBeetle": {
+    "file": "assets/img/heroBeetle.png",
+    "w": 64,
+    "h": 64,
+    "from": "ui.sprites.js"
+  },
+  "honeyBug": {
+    "file": "assets/img/honeyBug.png",
+    "w": 32,
+    "h": 32,
+    "from": "ui.sprites.js"
+  },
+  "wasp": {
+    "file": "assets/img/wasp.png",
+    "w": 32,
+    "h": 32,
+    "from": "ui.sprites.js"
+  },
+  "mothPale": {
+    "file": "assets/img/mothPale.png",
+    "w": 32,
+    "h": 32,
+    "from": "ui.sprites.js"
+  },
+  "iconMagnifier": {
+    "file": "assets/img/iconMagnifier.png",
+    "w": 16,
+    "h": 16,
+    "from": "ui.sprites.js"
+  },
+  "iconSugar": {
+    "file": "assets/img/iconSugar.png",
+    "w": 16,
+    "h": 16,
+    "from": "ui.sprites.js"
+  },
+  "iconLeaf": {
+    "file": "assets/img/iconLeaf.png",
+    "w": 16,
+    "h": 16,
+    "from": "ui.sprites.js"
+  },
+  "iconHoney": {
+    "file": "assets/img/iconHoney.png",
+    "w": 16,
+    "h": 16,
+    "from": "ui.sprites.js"
+  },
+  "iconLantern": {
+    "file": "assets/img/iconLantern.png",
+    "w": 16,
+    "h": 16,
+    "from": "ui.sprites.js"
+  },
+  "iconGear": {
+    "file": "assets/img/iconGear.png",
+    "w": 16,
+    "h": 16,
+    "from": "ui.sprites.js"
+  },
+  "iconFlask": {
+    "file": "assets/img/iconFlask.png",
+    "w": 16,
+    "h": 16,
+    "from": "ui.sprites.js"
+  },
+  "iconCrown": {
+    "file": "assets/img/iconCrown.png",
+    "w": 16,
+    "h": 16,
+    "from": "ui.sprites.js"
+  }
+}

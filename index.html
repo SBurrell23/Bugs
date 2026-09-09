@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bugs</title>
+<meta name="description" content="An incremental game about a very small problem that gets much bigger.">
+<link rel="icon" type="image/png" href="assets/img/ant.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- bugs crawl around back here -->
+<div id="crawl-layer" aria-hidden="true"></div>
+<div id="vignette" aria-hidden="true"></div>
+
+<div id="app">
+
+  <header id="topbar">
+    <div class="brand">
+      <img id="brand-bug" alt="" width="32" height="32">
+      <div class="brand-text">
+        <h1>BUGS</h1>
+        <p id="tagline">a very small problem</p>
+      </div>
+    </div>
+
+    <div id="goal-block">
+      <div class="goal-row">
+        <span class="goal-label">The Millionth Bug</span>
+        <span id="goal-figures">0 / 1,000,000</span>
+      </div>
+      <div id="goal-track"><div id="goal-fill"></div><div id="goal-shine"></div></div>
+    </div>
+
+    <div id="audio-block">
+      <button id="music-toggle" class="chip" aria-pressed="false" title="Background music">Music: off</button>
+      <input id="music-vol" class="slider" type="range" min="0" max="100" value="45" aria-label="Music volume">
+      <button id="sfx-toggle" class="chip" aria-pressed="true" title="Sound effects">Sound: on</button>
+      <button id="critter-toggle" class="chip" aria-pressed="true" title="Bugs crawling on screen">Critters: on</button>
+    </div>
+  </header>
+
+  <main id="board">
+
+    <!-- ---------------- left: the log ---------------- -->
+    <section id="col-left" class="column">
+      <div id="counter-card" class="card">
+        <div id="bug-count">0</div>
+        <div id="bug-word">bugs</div>
+        <div id="bps-line"><span id="bps">0.0</span> per second</div>
+      </div>
+
+      <div id="log-stage">
+        <div id="log-slab">
+          <button id="hero-btn" type="button" aria-label="Poke the beetle to collect bugs">
+            <img id="hero-img" alt="" width="64" height="64" draggable="false">
+          </button>
+          <div id="hero-glow" aria-hidden="true"></div>
+        </div>
+        <p id="click-info"><span id="click-value">1</span> per poke</p>
+      </div>
+
+      <div id="boon-bar" aria-live="polite"></div>
+
+      <div id="feed-card" class="card">
+        <h3>Field Log</h3>
+        <ul id="feed" aria-live="polite"></ul>
+      </div>
+    </section>
+
+    <!-- ---------------- middle: tabs ---------------- -->
+    <section id="col-mid" class="column">
+      <nav id="tabs" role="tablist" aria-label="Sections">
+        <button class="tab active" role="tab" data-panel="upgrades" aria-selected="true">
+          Upgrades <span class="badge" id="badge-upgrades">0</span>
+        </button>
+        <button class="tab" role="tab" data-panel="monuments" aria-selected="false">
+          Monuments <span class="badge" id="badge-monuments">0</span>
+        </button>
+        <button class="tab" role="tab" data-panel="lab" aria-selected="false">Lab</button>
+        <button class="tab" role="tab" data-panel="awards" aria-selected="false">
+          Awards <span class="badge" id="badge-awards">0</span>
+        </button>
+        <button class="tab" role="tab" data-panel="stats" aria-selected="false">Stats</button>
+      </nav>
+
+      <div id="panels">
+        <div class="panel active" id="panel-upgrades" role="tabpanel">
+          <p class="panel-hint">One-off improvements. Each one is permanent.</p>
+          <div id="upgrade-grid" class="grid"></div>
+          <p class="empty" id="upgrades-empty">Nothing new yet. Keep collecting.</p>
+        </div>
+
+        <div class="panel" id="panel-monuments" role="tabpanel">
+          <p class="panel-hint">Three landmarks. Expensive, permanent, and they change the rules.</p>
+          <div id="monument-list"></div>
+        </div>
+
+        <div class="panel" id="panel-lab" role="tabpanel">
+          <p class="panel-hint">Studies take real time to run. Something should always be on the bench.</p>
+          <div id="lab-active"></div>
+          <div id="study-list"></div>
+        </div>
+
+        <div class="panel" id="panel-awards" role="tabpanel">
+          <p class="panel-hint">Every award nudges all production up a little. They add up.</p>
+          <div id="award-grid"></div>
+        </div>
+
+        <div class="panel" id="panel-stats" role="tabpanel">
+          <div id="stats-body"></div>
+          <div class="danger-zone">
+            <button id="export-btn" class="btn ghost">Copy save</button>
+            <button id="import-btn" class="btn ghost">Paste save</button>
+            <button id="wipe-btn" class="btn danger">Burn the log</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------------- right: colonies ---------------- -->
+    <section id="col-right" class="column">
+      <div id="colony-head">
+        <h2>Colonies</h2>
+        <div id="buy-amount" role="group" aria-label="Purchase quantity">
+          <button class="qty active" data-qty="1">x1</button>
+          <button class="qty" data-qty="10">x10</button>
+          <button class="qty" data-qty="max">max</button>
+        </div>
+      </div>
+      <div id="colony-list"></div>
+    </section>
+
+  </main>
+</div>
+
+<!-- first-gesture gate, so the music is allowed to start -->
+<div id="gate">
+  <div id="gate-card">
+    <img id="gate-bug" alt="" width="64" height="64">
+    <h2>BUGS</h2>
+    <p>You have found a rotting log. There is something underneath it.</p>
+    <p class="fine">Poke the beetle to collect bugs. Spend bugs to get more bugs.
+       Reach one million and the log is yours.</p>
+    <button id="gate-btn" class="btn primary">Lift the log</button>
+    <p class="fine muted">Includes music and sound effects. Both can be turned off at any time.</p>
+  </div>
+</div>
+
+<!-- victory -->
+<div id="victory" hidden>
+  <div id="victory-card">
+    <img id="victory-bug" alt="" width="64" height="64">
+    <h2>A MILLION LITTLE LEGS</h2>
+    <p id="victory-line"></p>
+    <div id="victory-stats"></div>
+    <button id="victory-btn" class="btn primary">Keep going</button>
+  </div>
+</div>
+
+<div id="toast-layer" aria-live="polite"></div>
+
+<audio id="music" loop preload="auto" src="assets/audio/bug-theme.mp3"></audio>
+
+<script src="js/data.js"></script>
+<script src="js/format.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/sprites.js"></script>
+<script src="js/crawlers.js"></script>
+<script src="js/game.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
