@@ -125,7 +125,38 @@
       noise({ dur: 0.035, freq: 2600 + step * 130, q: 0.7, gain: 0.055 });
     },
 
-    /** Buying a colony. */
+    /** A small confirmation tick, for toggles and throttles. */
+    tick() {
+      tone({ type: 'square', freq: 660, dur: 0.03, gain: 0.05 });
+    },
+
+    /**
+     * Gathering by hand. A wet scrape rather than a click, and it goes flat
+     * and dull when the silo is already full.
+     */
+    forage(full) {
+      if (full) {
+        tone({ type: 'square', freq: 150, to: 120, dur: 0.09, gain: 0.06, curve: 'exp' });
+        return;
+      }
+      noise({ dur: 0.09, freq: 1500, to: 520, q: 1.6, gain: 0.075 });
+      tone({ type: 'triangle', freq: 300, to: 430, dur: 0.07, gain: 0.07 });
+    },
+
+    /** The Queen posts a new order. Two clear notes, like a bell in a hall. */
+    demandNew() {
+      tone({ type: 'sine', freq: 587, dur: 0.28, gain: 0.1 });
+      tone({ type: 'sine', freq: 880, dur: 0.36, gain: 0.09, delay: 0.14 });
+    },
+
+    /** An order filled. The payoff sound, so it is the brightest one here. */
+    demandDone() {
+      arp([523, 659, 784, 1047], 0.06, { type: 'triangle', dur: 0.34, gain: 0.14 });
+      tone({ type: 'sine', freq: 262, to: 523, dur: 0.5, gain: 0.11, curve: 'exp' });
+      noise({ dur: 0.3, freq: 4800, to: 1400, q: 0.6, gain: 0.05 });
+    },
+
+    /** Buying a building. */
     buy() {
       tone({ type: 'square', freq: 330, dur: 0.07, gain: 0.1 });
       tone({ type: 'square', freq: 494, dur: 0.1, gain: 0.1, delay: 0.06 });

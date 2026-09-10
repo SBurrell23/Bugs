@@ -1,114 +1,132 @@
 /**
- * check-balance.js - a regression test for the game's pacing.
+ * check-balance.js - a regression test for the game's pacing and fairness.
  *
- * Runs the headless player over several seeds and asserts the run still looks
- * like the game we designed: it finishes, it takes roughly two hours, no
- * colony is dead content, all three monuments get raised, and the player is
- * never left staring at a screen with nothing to buy.
+ * Asserts the things that make this the game we designed rather than merely a
+ * game that finishes:
+ *   - a normal run takes about an hour
+ *   - bugs come from BOTH the brood and the Queen
+ *   - leaving the tab alone does NOT win, at any timescale
+ *   - poor chain balancing costs you real time, but is still winnable
+ *   - no cost can ever exceed what a silo is able to hold
  *
- * Exits non-zero on failure, so CI can gate on it.
+ * Exits non-zero on failure so CI can gate on it.
  */
 'use strict';
 
+const { run, fmt, num, pct } = require('./simulate');
 const API = require('../js/data.js');
-const { makeSim, fmt } = require('./simulate.js');
 
 const D = API.build();
-const sim = makeSim(D);
-const SEEDS = [4242, 99, 20260909, 777, 31337];
+const SEEDS = [4242, 8080, 20260909];
 
-const BOUNDS = {
-  casualMin: 70 * 60,
-  casualMax: 170 * 60,
-  activeMin: 30 * 60,
-  idleMax: 8 * 3600,
-  maxIdleGap: 10 * 60,
+const B = {
+  normalMin: 42 * 60,
+  normalMax: 88 * 60,
+  broodShareMin: 0.3,
+  broodShareMax: 0.7,
+  maxIdleGap: 6 * 60,
   minEndBps: 800,
-  maxEndBps: 40000,
+  maxEndBps: 30000,
+  minOwned: 5,
 };
 
 const failures = [];
-const note = [];
+const check = (label, ok, detail) => { if (!ok) failures.push(label + ' -- ' + detail); };
 
-function longestGap(s, win) {
-  let prev = 0, worst = 0;
-  for (const t of s.buyTimes) { if (t - prev > worst) worst = t - prev; prev = t; }
-  const tail = (win || s.t) - prev;
-  return Math.max(worst, tail);
-}
+/* ---------- static check: nothing may cost more than a silo can hold ------ */
+const capMult = {};
+D.RESOURCES.forEach((r) => { capMult[r.id] = 1; });
+D.UPGRADES.filter((u) => u.kind === 'cap').forEach((u) => { capMult[u.target] *= u.mult; });
+const maxCap = {};
+D.RESOURCES.forEach((r) => { maxCap[r.id] = r.cap * capMult[r.id]; });
 
-function check(label, ok, detail) {
-  if (!ok) failures.push(label + ' -- ' + detail);
-  return ok;
-}
+D.MONUMENTS.forEach(function (m) {
+  for (const res in m.cost) {
+    if (res === 'bugs') continue;
+    check('monument cost fits in a silo', m.cost[res] <= maxCap[res],
+      m.name + ' wants ' + m.cost[res] + ' ' + res + ' but the largest store holds ' + maxCap[res]);
+  }
+});
+D.BUILDINGS.forEach(function (b) {
+  for (const res in b.cost) {
+    if (res === 'bugs') continue;
+    check('building base cost fits in a silo', b.cost[res] <= maxCap[res] * 0.5,
+      b.name + ' wants ' + b.cost[res] + ' ' + res);
+  }
+});
 
+/* ---------- the runs ---------- */
 console.log('Balance check over ' + SEEDS.length + ' seeds\n');
-console.log('seed        casual    active      idle   endBps  colonies       mon  idleGap');
+console.log('seed        normal   brood%   mon  buildings              endBps  idleGap    afk       sloppy');
+
+const normalTimes = [];
 
 for (const seed of SEEDS) {
-  const casual = sim.run('casual', seed);
-  const active = sim.run('active', seed);
-  const idle = sim.run('idle', seed);
+  const normal = run('normal', seed);
+  const afk = run('afk', seed);
+  const sloppy = run('sloppy', seed);
 
-  const win = casual.marks.WIN;
-  const owned = D.COLONIES.map((g) => casual.s.owned[g.id]);
-  const monuments = Object.keys(casual.s.monuments).length;
-  const gap = longestGap(casual.s, win);
+  const s = normal.stats;
+  const total = s.broodBugs + s.demandBugs;
+  const broodShare = total ? s.broodBugs / total : 0;
+  const win = normal.marks.WIN;
 
   console.log(
     String(seed).padEnd(10) +
     fmt(win).padStart(8) +
-    fmt(active.marks.WIN).padStart(10) +
-    fmt(idle.marks.WIN).padStart(10) +
-    String(Math.round(casual.bps)).padStart(9) + '  ' +
-    owned.join('/').padEnd(16) +
-    (monuments + '/3').padStart(4) +
-    fmt(gap).padStart(9)
+    pct(broodShare).padStart(8) +
+    (s.monuments + '/3').padStart(6) + '  ' +
+    normal.owned.join('/').padEnd(22) +
+    num(s.bps).padStart(8) +
+    fmt(normal.idleGap).padStart(9) +
+    (afk.marks.WIN === undefined ? '  never' : '  ' + fmt(afk.marks.WIN)).padStart(9) +
+    fmt(sloppy.marks.WIN).padStart(12)
   );
 
   const tag = 'seed ' + seed;
-  check(tag + ': casual run finishes', win !== undefined, 'never reached one million');
+  check(tag + ': a normal run finishes', win !== undefined, 'never reached one million');
   if (win === undefined) continue;
+  normalTimes.push(win);
 
-  check(tag + ': casual run is about two hours',
-    win >= BOUNDS.casualMin && win <= BOUNDS.casualMax,
-    'finished in ' + fmt(win) + ', wanted ' + fmt(BOUNDS.casualMin) + ' to ' + fmt(BOUNDS.casualMax));
+  check(tag + ': a normal run takes about an hour',
+    win >= B.normalMin && win <= B.normalMax,
+    'finished in ' + fmt(win) + ', wanted ' + fmt(B.normalMin) + ' to ' + fmt(B.normalMax));
 
-  check(tag + ': heavy clicking is not a shortcut past the whole game',
-    active.marks.WIN >= BOUNDS.activeMin,
-    'active finished in ' + fmt(active.marks.WIN));
+  check(tag + ': both income sources matter',
+    broodShare >= B.broodShareMin && broodShare <= B.broodShareMax,
+    'the brood supplied ' + pct(broodShare) + ' of all bugs');
 
-  check(tag + ': a hands-off run still finishes',
-    idle.marks.WIN !== undefined && idle.marks.WIN <= BOUNDS.idleMax,
-    'idle finished in ' + fmt(idle.marks.WIN));
+  check(tag + ': leaving the tab alone does not win',
+    afk.marks.WIN === undefined,
+    'an idle run finished in ' + fmt(afk.marks.WIN));
 
-  check(tag + ': every colony is worth owning',
-    owned.every((n) => n >= 5),
-    'owned ' + owned.join('/') + ' -- something is dead content');
+  check(tag + ': poor balancing costs real time',
+    sloppy.marks.WIN === undefined || sloppy.marks.WIN > win * 1.1,
+    'sloppy play finished in ' + fmt(sloppy.marks.WIN) + ' against ' + fmt(win));
 
-  check(tag + ': all three monuments get raised', monuments === 3,
-    'only raised ' + monuments);
+  check(tag + ': poor balancing is still winnable',
+    sloppy.marks.WIN !== undefined,
+    'a sloppy run never finished, which is too punishing');
+
+  check(tag + ': every building is worth owning',
+    normal.owned.every((n) => n >= B.minOwned),
+    'owned ' + normal.owned.join('/') + ' -- something is dead content');
+
+  check(tag + ': all three monuments get raised', s.monuments === 3,
+    'only raised ' + s.monuments);
 
   check(tag + ': there is always something to buy',
-    gap <= BOUNDS.maxIdleGap,
-    'went ' + fmt(gap) + ' with nothing worth buying');
+    normal.idleGap <= B.maxIdleGap,
+    'went ' + fmt(normal.idleGap) + ' with nothing worth buying');
 
-  check(tag + ': the last million is still a real push',
-    casual.bps >= BOUNDS.minEndBps && casual.bps <= BOUNDS.maxEndBps,
-    'final output was ' + Math.round(casual.bps) + ' per second');
-
-  note.push(win);
+  check(tag + ': the last stretch is still a push',
+    s.bps >= B.minEndBps && s.bps <= B.maxEndBps,
+    'final output was ' + Math.round(s.bps) + ' per second');
 }
 
-// content coverage, checked once
-const best = sim.run('casual', 4242);
-const upgradeShare = best.s.bought.size / D.UPGRADES.length;
-check('a decent share of the upgrades get bought', upgradeShare >= 0.35,
-  'only ' + Math.round(upgradeShare * 100) + '% were worth buying');
-
-if (note.length) {
-  const avg = note.reduce((a, b) => a + b, 0) / note.length;
-  console.log('\nmean casual run: ' + fmt(avg));
+if (normalTimes.length) {
+  const avg = normalTimes.reduce((a, b) => a + b, 0) / normalTimes.length;
+  console.log('\nmean normal run: ' + fmt(avg));
 }
 
 if (failures.length) {

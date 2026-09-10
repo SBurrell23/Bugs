@@ -1,16 +1,19 @@
 /**
  * data.js - all game content and balance numbers.
  *
- * Everything is built from a small TUNING block so tools/tune.js can sweep the
- * curve and tools/simulate.js can verify the pacing. Loaded as a browser script
- * (window.BUGS_DATA) and required by the tooling.
+ * The economy is a production chain, not a pile of multipliers:
  *
- * Shape of the economy:
- *   - 6 COLONIES  : ordinary producers you buy over and over
- *   - 3 MONUMENTS : one-off late landmarks that multiply everything
- *   - UPGRADES    : per-colony doublers, click power, global multipliers
- *   - STUDIES     : timed lab research
- *   - ACHIEVEMENTS: each adds a small permanent bonus
+ *   Sap Tapper  -> SAP  -> Aphid Pasture -> HONEYDEW -+-> Pollen Gatherer -> POLLEN -> Wax Works -> WAX -+
+ *   Leaf Cutter -> LEAF -> Termite Mound -> FUNGUS ---|-------------------------------------------------|-> Brood Chamber -> BUGS
+ *                                                     +-------------------------------------------------+
+ *
+ * HONEYDEW feeds both the pollen branch and the brood, so the sap chain has to
+ * be overbuilt. That is the central balancing problem the player is solving.
+ * The graph is a DAG, so the chain can stall but never deadlock: the two raw
+ * harvesters take no inputs and always run.
+ *
+ * Everything is built from one TUNING block so tools/tune.js can sweep the
+ * curve and tools/simulate.js can verify the pacing.
  */
 (function (root, factory) {
   const api = factory();
@@ -22,101 +25,124 @@
 
   const DEFAULT_TUNING = {
     goal: 1000000,
-    colonyBaseCost: 15,
-    colonyBaseBps: 0.034,
-    colonyCostRatio: 6.5,
-    colonyBpsRatio: 2.95,
-    costGrowth: 1.12,
-    genUpgradeCostMult: [60, 430, 3400, 24000],
-    genUpgradeOwned: [4, 12, 25, 40],
-    clickCount: 6,
-    clickReq0: 120,
-    clickReqRatio: 5.8,
-    globalCount: 7,
-    globalReq0: 1400,
-    globalReqRatio: 4.0,
-    globalMult: 1.22,
-    achBonus: 0.005,
-    studyCount: 6,
-    studyReq0: 3000,
-    studyReqRatio: 4.2,
-    studyMult: 1.12,
-    monumentCosts: [55000, 170000, 390000],
-    monumentMults: [1.3, 1.38, 1.5],
+    costGrowth: 1.155,
+    // Resource costs climb far more gently than bug costs. If they matched,
+    // the stockpile a late building demands would exceed what a silo can ever
+    // hold and the building would become quietly unbuyable.
+    resourceCostGrowth: 1.06,
+    broodYield: 22,         // bugs per second per Brood Chamber
+    demandEvery: [46, 74],  // seconds between the Queen's demands
+    demandWindow: 105,      // seconds allowed to fill one
+    demandCover: 30,        // a demand asks for this many seconds of your output
+    demandPay: 4,           // bugs per point of resource value delivered
+    streakStep: 0.16,       // each consecutive fill adds this to the payout
+    streakMax: 2.6,
+    capBase: 1.0,           // scales every storage cap
+    upgradeCostMult: 1.0,
   };
 
-  const COLONY_TEXT = [
-    ['antHill', 'Ant Hill', 'ant',
-      'A modest mound of loam. The workers never stop, and never ask why.'],
-    ['aphidPasture', 'Aphid Pasture', 'aphid',
-      'Herded on tender stems and milked for honeydew. They do not seem to mind.'],
-    ['ladybugGrove', 'Ladybug Grove', 'ladybug',
-      'Spotted shells drift between the leaves, eating anything smaller than themselves.'],
-    ['cricketHollow', 'Cricket Hollow', 'cricket',
-      'A damp hollow that sings all night. The chirping turns out to be load-bearing.'],
-    ['beetleFoundry', 'Stag Beetle Foundry', 'stagBeetle',
-      'Antlered giants haul chitin ingots through the sawdust. Hard hats optional.'],
-    ['fireflyReactor', 'Firefly Reactor', 'firefly',
-      'Cold light, warm output. Do not look directly into the abdomen.'],
+  /* ------------------------------------------------------------------ *
+   * RESOURCES
+   * `value` is what a unit is worth when the Queen pays for it, and is
+   * what the demand generator uses to keep rewards proportionate.
+   * ------------------------------------------------------------------ */
+  const RESOURCE_DEFS = [
+    ['sap', 'Sap', 'resSap', 0, 420, 1.0,
+      'Tapped straight from the log. Sticky, plentiful, and the base of everything.'],
+    ['leaf', 'Leaf', 'resLeaf', 0, 420, 1.0,
+      'Cut and carried home in pieces. The other thing you can always get more of.'],
+    ['honeydew', 'Honeydew', 'resHoneydew', 1, 300, 2.6,
+      'Refined sap. Feeds the brood, and fuels every bee you own.'],
+    ['fungus', 'Fungus', 'resFungus', 1, 300, 2.5,
+      'Grown on chewed leaf in the dark. Nobody asks what else is in there.'],
+    ['pollen', 'Pollen', 'resPollen', 2, 260, 2.3,
+      'Gathered on the wing, which costs honeydew to go and do.'],
+    ['wax', 'Wax', 'resWax', 3, 240, 5.6,
+      'Secreted, scraped and stacked. The most expensive thing in the log.'],
   ];
 
-  const MONUMENT_TEXT = [
-    ['mantisTemple', 'Mantis Temple', 'mantis',
-      'They fold their arms and wait. Bugs simply arrive. Nobody asks about the acolytes.',
-      'Raiding wasps now flee on sight, dropping what they carried.'],
-    ['cicadaChorus', 'Cicada Chorus', 'cicada',
-      'Seventeen years underground, all of it spent counting. Now they count for you.',
-      'Honey Bugs surface far more often.'],
-    ['hiveSingularity', 'Hive Singularity', 'queenBee',
-      'One mind, ten million bodies. It has begun to make suggestions.',
-      'Every poke of the beetle draws on the whole colony at once.'],
+  /* ------------------------------------------------------------------ *
+   * BUILDINGS
+   * stage is the topological order the tick resolves them in. Each one
+   * costs bugs plus, from the third onwards, a stock of the very resource
+   * it is about to start eating.
+   * ------------------------------------------------------------------ */
+  const BUILDING_DEFS = [
+    {
+      id: 'sapTapper', name: 'Sap Tapper', sprite: 'ant', stage: 0,
+      cost: { bugs: 15 },
+      inputs: {}, outputs: { sap: 0.8 },
+      blurb: 'Ants chew a wound in the bark and keep it open. The log does not enjoy this.',
+    },
+    {
+      id: 'leafCutter', name: 'Leaf Cutter', sprite: 'leafcutter', stage: 0,
+      cost: { bugs: 22 },
+      inputs: {}, outputs: { leaf: 0.7 },
+      blurb: 'A column of ants carrying green flags home, all day, without discussion.',
+    },
+    {
+      id: 'aphidPasture', name: 'Aphid Pasture', sprite: 'aphid', stage: 1,
+      cost: { bugs: 90, sap: 60 },
+      inputs: { sap: 1.5 }, outputs: { honeydew: 1.0 },
+      blurb: 'Aphids drink sap and make something sweeter. You are, technically, a dairy farmer.',
+    },
+    {
+      id: 'termiteMound', name: 'Termite Mound', sprite: 'termiteWorker', stage: 1,
+      cost: { bugs: 120, leaf: 70 },
+      inputs: { leaf: 1.4 }, outputs: { fungus: 0.9 },
+      blurb: 'Leaf goes in, gets chewed, and is left to go interesting in the dark.',
+    },
+    {
+      id: 'pollenGatherer', name: 'Pollen Gatherer', sprite: 'honeyBee', stage: 2,
+      cost: { bugs: 340, honeydew: 90 },
+      inputs: { honeydew: 0.5 }, outputs: { pollen: 0.9 },
+      blurb: 'Bees will fly a long way for you, but not on an empty stomach.',
+    },
+    {
+      id: 'waxWorks', name: 'Wax Works', sprite: 'waxScale', stage: 3,
+      cost: { bugs: 900, pollen: 120 },
+      inputs: { pollen: 1.2 }, outputs: { wax: 0.6 },
+      blurb: 'Scale insects sit very still and secrete. It is slow, and there is no hurrying it.',
+    },
+    {
+      id: 'broodChamber', name: 'Brood Chamber', sprite: 'grub', stage: 4,
+      cost: { bugs: 2200, wax: 90 },
+      inputs: { honeydew: 0.8, fungus: 0.7, wax: 0.4 }, outputs: {},
+      brood: true,
+      blurb: 'Warm, humid and full of grubs. Every bug you will ever have starts here.',
+    },
   ];
 
-  const CLICK_TEXT = [
-    ['Sharpened Fingernail', 'iconMagnifier', 'Mind the splinters.'],
-    ['Sap-Sticky Gloves', 'iconHoney', 'Nothing escapes the tack.'],
-    ['Brass Tweezers', 'iconMagnifier', 'Surgical, and slightly cruel.'],
-    ['Pooter Aspirator', 'iconFlask', 'Do not inhale on the wrong end.'],
-    ['Beating Sheet', 'iconLeaf', 'Whack a branch, collect the rain.'],
-    ['Mercury Light Trap', 'iconLantern', 'The night comes to you.'],
-    ['Pitfall Array', 'iconGear', 'Gravity does the work.'],
-    ['Malaise Tent', 'iconCrown', 'An entire flyway, funnelled.'],
+  /* ------------------------------------------------------------------ *
+   * MONUMENTS - three one-off landmarks that each change a rule
+   * ------------------------------------------------------------------ */
+  const MONUMENT_DEFS = [
+    {
+      id: 'mantisTemple', name: 'Mantis Temple', sprite: 'mantis',
+      cost: { bugs: 30000, fungus: 260 },
+      mult: 1.0, perk: 'wards',
+      effect: 'Raiding wasps flee on sight and drop what they were carrying.',
+      extra: 'The Queen runs two demands at once from now on.',
+      blurb: 'They fold their arms and wait. Nobody asks about the acolytes.',
+    },
+    {
+      id: 'cicadaChorus', name: 'Cicada Chorus', sprite: 'cicada',
+      cost: { bugs: 120000, wax: 220 },
+      mult: 1.0, perk: 'harvest',
+      effect: 'Every Sap Tapper and Leaf Cutter works a third harder.',
+      extra: 'Honey Bugs surface far more often.',
+      blurb: 'Seventeen years underground, all of it spent counting. Now they count for you.',
+    },
+    {
+      id: 'hiveSingularity', name: 'Hive Singularity', sprite: 'queenBee',
+      cost: { bugs: 360000, wax: 420 },
+      mult: 1.45, perk: 'hive',
+      effect: 'Every building in the log runs 45% harder.',
+      extra: 'Demands last half again as long and pay a quarter more.',
+      blurb: 'One mind, ten million bodies. It has begun to make suggestions.',
+    },
   ];
 
-  const GLOBAL_TEXT = [
-    ['Loam Tilling', 'iconLeaf', 'Aerated soil. Everything underneath works harder.'],
-    ['Pheromone Trails', 'iconFlask', 'Chemical highways. No bug takes a wrong turn again.'],
-    ['Rotting Log Annex', 'iconGear', 'You have annexed the log. The log did not object.'],
-    ['Humidity Domes', 'iconHoney', 'Warm, wet, and faintly alarming. Output soars.'],
-    ['Fungal Symbiosis', 'iconLeaf', 'The mycelium files quarterly reports now.'],
-    ['Chitin Reinforcement', 'iconGear', 'Every shell lacquered. Every joint tightened.'],
-    ['Brood Optimisation', 'iconSugar', 'Eggs on a schedule. Larvae with quotas.'],
-    ['Hive Mind Uplink', 'iconCrown', 'Ten million minds, one shared thought: more.'],
-  ];
-
-  const STUDY_TEXT = [
-    ['Pitfall Trapping', 45],
-    ['Larval Nutrition', 80],
-    ['Wing Venation Survey', 130],
-    ['Compound Eye Optics', 190],
-    ['Exoskeleton Alloys', 260],
-    ['Pheromone Cryptography', 340],
-    ['Diapause Control', 420],
-    ['Swarm Calculus', 500],
-  ];
-
-  const SYNERGY_TEXT = [
-    ['Field Notes, Volume I', 0.008, 'Each poke also yields 0.8% of your bugs per second.'],
-    ['Field Notes, Volume II', 0.02, 'Each poke yields a further 2% of your bugs per second.'],
-    ['Field Notes, Volume III', 0.05, 'Each poke yields a further 5% of your bugs per second.'],
-  ];
-
-  /** "Foundry" -> "Foundries", "Ant Hill" -> "Ant Hills". */
-  function plural(name) {
-    return /[^aeiou]y$/.test(name) ? name.slice(0, -1) + 'ies' : name + 's';
-  }
-
-  /** Round to something a player would enjoy reading. */
   function pretty(n) {
     if (n < 100) return Math.round(n);
     const mag = Math.pow(10, Math.floor(Math.log10(n)) - 1);
@@ -126,190 +152,238 @@
   function build(overrides) {
     const T = Object.assign({}, DEFAULT_TUNING, overrides || {});
 
-    /* ---------------- colonies ---------------- */
-    const COLONIES = COLONY_TEXT.map(function (c, i) {
+    const RESOURCES = RESOURCE_DEFS.map(function (r, i) {
       return {
-        id: c[0], name: c[1], sprite: c[2], blurb: c[3], index: i,
-        cost: pretty(T.colonyBaseCost * Math.pow(T.colonyCostRatio, i)),
-        bps: Number((T.colonyBaseBps * Math.pow(T.colonyBpsRatio, i)).toPrecision(3)),
+        id: r[0], name: r[1], sprite: r[2], tier: r[3],
+        cap: Math.round(r[4] * T.capBase), value: r[5], blurb: r[6], index: i,
       };
     });
 
-    /* ---------------- monuments ---------------- */
-    const MONUMENTS = MONUMENT_TEXT.map(function (m, i) {
-      return {
-        id: m[0], name: m[1], sprite: m[2], blurb: m[3], perk: m[4], index: i,
-        cost: T.monumentCosts[i],
-        mult: T.monumentMults[i],
-      };
+    const BUILDINGS = BUILDING_DEFS.map(function (b, i) {
+      return Object.assign({}, b, {
+        index: i,
+        outputs: Object.assign({}, b.outputs),
+        inputs: Object.assign({}, b.inputs),
+        cost: Object.assign({}, b.cost),
+        broodYield: b.brood ? T.broodYield : 0,
+      });
     });
 
-    /* ---------------- upgrades ---------------- */
+    const MONUMENTS = MONUMENT_DEFS.map(function (m, i) {
+      return Object.assign({}, m, { index: i, cost: Object.assign({}, m.cost) });
+    });
+
+    /* ---------------- upgrades ----------------
+     * yield  - a building produces more per second
+     * thrift - a building eats less input, which changes the whole ratio
+     * cap    - a silo holds more
+     * forage - hand gathering yields more
+     * queen  - demands pay more
+     * global - every building works harder
+     */
     const UPGRADES = [];
-    const TIER_LABEL = ['Nursery', 'Warren', 'Dynasty', 'Leviathan'];
+    const add = (u) => UPGRADES.push(Object.assign({ cost: {}, req: {} }, u));
 
-    COLONIES.forEach(function (g) {
-      T.genUpgradeOwned.forEach(function (owned, i) {
-        UPGRADES.push({
-          id: g.id + '_t' + i,
-          kind: 'gen',
-          target: g.id,
-          name: g.name + ' ' + TIER_LABEL[i],
-          desc: 'Doubles the output of every ' + g.name + '.',
-          icon: g.sprite,
-          cost: pretty(g.cost * T.genUpgradeCostMult[i]),
-          mult: 2,
-          req: { gen: g.id, owned: owned },
+    const YIELD_STEPS = [
+      { owned: 5, mult: 1.30, costMult: 16, label: 'Deeper Cuts' },
+      { owned: 18, mult: 1.35, costMult: 130, label: 'Second Shift' },
+      { owned: 45, mult: 1.40, costMult: 900, label: 'Full Flood' },
+    ];
+    const THRIFT_STEPS = [
+      { owned: 10, save: 0.16, costMult: 70, label: 'Careful Hands' },
+      { owned: 30, save: 0.18, costMult: 520, label: 'Nothing Wasted' },
+    ];
+
+    BUILDINGS.forEach(function (b) {
+      YIELD_STEPS.forEach(function (st, i) {
+        add({
+          id: b.id + '_y' + i, kind: 'yield', target: b.id, icon: 'iconSpeed',
+          name: b.name + ': ' + st.label,
+          desc: b.name + ' produces ' + Math.round((st.mult - 1) * 100) + '% more.',
+          mult: st.mult,
+          cost: { bugs: pretty((b.cost.bugs || 20) * st.costMult) },
+          req: { building: b.id, owned: st.owned },
+        });
+      });
+      if (Object.keys(b.inputs).length) {
+        THRIFT_STEPS.forEach(function (st, i) {
+          add({
+            id: b.id + '_t' + i, kind: 'thrift', target: b.id, icon: 'iconGear',
+            name: b.name + ': ' + st.label,
+            desc: b.name + ' needs ' + Math.round(st.save * 100) + '% less of everything it eats.',
+            save: st.save,
+            cost: { bugs: pretty((b.cost.bugs || 20) * st.costMult) },
+            req: { building: b.id, owned: st.owned },
+          });
+        });
+      }
+    });
+
+    RESOURCES.forEach(function (r, i) {
+      [{ mult: 2.0, costMult: 1 }, { mult: 2.5, costMult: 9 }].forEach(function (st, j) {
+        add({
+          id: 'cap_' + r.id + '_' + j, kind: 'cap', target: r.id, icon: 'iconSilo',
+          name: 'Bigger ' + r.name + ' Store',
+          desc: r.name + ' storage x' + st.mult + '. Anything produced past the cap is lost.',
+          mult: st.mult,
+          cost: { bugs: pretty(300 * Math.pow(3.2, i * 0.55) * st.costMult) },
+          req: { lifetime: pretty(700 * Math.pow(3.0, i * 0.55) * st.costMult) },
         });
       });
     });
 
-    for (let i = 0; i < T.clickCount; i++) {
-      const req = pretty(T.clickReq0 * Math.pow(T.clickReqRatio, i));
-      UPGRADES.push({
-        id: 'click' + i, kind: 'click',
-        name: CLICK_TEXT[i][0], icon: CLICK_TEXT[i][1],
-        desc: 'Doubles bugs per poke. ' + CLICK_TEXT[i][2],
-        cost: pretty(req * 1.15), mult: 2, req: { lifetime: req },
-      });
-    }
-
-    for (let i = 0; i < T.globalCount; i++) {
-      const req = pretty(T.globalReq0 * Math.pow(T.globalReqRatio, i));
-      const mult = Number((T.globalMult + i * 0.03).toFixed(2));
-      UPGRADES.push({
-        id: 'global' + i, kind: 'global',
-        name: GLOBAL_TEXT[i][0], icon: GLOBAL_TEXT[i][1],
-        desc: 'All bug production x' + mult + '. ' + GLOBAL_TEXT[i][2],
-        cost: pretty(req * 0.85), mult: mult, req: { lifetime: req },
-      });
-    }
-
-    SYNERGY_TEXT.forEach(function (u, i) {
-      const req = pretty(30000 * Math.pow(9, i));
-      UPGRADES.push({
-        id: 'synergy' + i, kind: 'synergy', name: u[0], icon: 'iconMagnifier',
-        desc: u[2], cost: pretty(req * 1.1), share: u[1], req: { lifetime: req },
+    [
+      ['Bare Hands', 1.5, 60, 220],
+      ['Cupped Leaf', 1.6, 900, 3200],
+      ['Bark Scoop', 1.7, 9000, 30000],
+      ['Swarm Call', 1.5, 70000, 240000],
+    ].forEach(function (u, i) {
+      add({
+        id: 'forage' + i, kind: 'forage', icon: 'iconMagnifier',
+        name: u[0], desc: 'Gathering by hand yields x' + u[1] + '.',
+        mult: u[1], cost: { bugs: u[2] }, req: { lifetime: u[3] },
       });
     });
 
-    /* ---------------- lab studies ---------------- */
-    const STUDIES = [];
-    for (let i = 0; i < T.studyCount; i++) {
-      const req = pretty(T.studyReq0 * Math.pow(T.studyReqRatio, i));
-      const mult = Number((T.studyMult + i * 0.04).toFixed(2));
-      STUDIES.push({
-        id: 'study' + i, name: STUDY_TEXT[i][0],
-        desc: 'Passive output x' + mult + ' once filed.',
-        cost: pretty(req * 0.8), seconds: STUDY_TEXT[i][1],
-        mult: mult, req: { lifetime: req },
+    [
+      ['Wax Seal', 1.30, 2600, 9000],
+      ['Royal Ledger', 1.35, 26000, 90000],
+      ['Standing Order', 1.40, 200000, 700000],
+    ].forEach(function (u, i) {
+      add({
+        id: 'queen' + i, kind: 'queen', icon: 'iconScroll',
+        name: u[0], desc: 'The Queen pays ' + Math.round((u[1] - 1) * 100) + '% more for every demand.',
+        mult: u[1], cost: { bugs: u[2] }, req: { lifetime: u[3] },
+      });
+    });
+
+    [
+      ['Warm Spell', 1.20, 5000, 18000],
+      ['Deep Galleries', 1.25, 45000, 160000],
+      ['Perfect Humidity', 1.30, 320000, 1100000],
+    ].forEach(function (u, i) {
+      add({
+        id: 'global' + i, kind: 'global', icon: 'iconLantern',
+        name: u[0], desc: 'Every building in the log works ' + Math.round((u[1] - 1) * 100) + '% harder.',
+        mult: u[1], cost: { bugs: u[2] }, req: { lifetime: u[3] },
+      });
+    });
+
+    if (T.upgradeCostMult !== 1) {
+      UPGRADES.forEach(function (u) {
+        if (u.cost.bugs) u.cost = Object.assign({}, u.cost, { bugs: pretty(u.cost.bugs * T.upgradeCostMult) });
       });
     }
 
     /* ---------------- achievements ---------------- */
     const ACHIEVEMENTS = [];
-    function ach(id, name, desc, test) {
-      ACHIEVEMENTS.push({ id: id, name: name, desc: desc, test: test });
-    }
+    const ach = (id, name, desc, test) => ACHIEVEMENTS.push({ id, name, desc, test });
 
     [
-      [1, 'First Contact', 'Collect your very first bug.'],
       [100, 'Small Infestation', 'Collect 100 bugs in total.'],
-      [1000, 'Noticeable Problem', 'Collect 1,000 bugs in total.'],
-      [25000, 'Call An Exterminator', 'Collect 25,000 bugs in total.'],
-      [250000, 'Biblical', 'Collect 250,000 bugs in total.'],
+      [2500, 'Noticeable Problem', 'Collect 2,500 bugs in total.'],
+      [40000, 'Call An Exterminator', 'Collect 40,000 bugs in total.'],
+      [300000, 'Biblical', 'Collect 300,000 bugs in total.'],
       [1000000, 'Seven Figures', 'Collect 1,000,000 bugs in total.'],
-      [5000000, 'Beyond Counting', 'Collect 5,000,000 bugs in total.'],
     ].forEach(function (a, i) {
-      ach('life' + i, a[1], a[2], function (s) { return s.lifetime >= a[0]; });
+      ach('life' + i, a[1], a[2], (s) => s.lifetime >= a[0]);
     });
 
-    [
-      [1, 'Poke', 'Poke the beetle once.'],
-      [100, 'Persistent', 'Poke the beetle 100 times.'],
-      [1000, 'Repetitive Strain', 'Poke the beetle 1,000 times.'],
-      [5000, 'Seek Help', 'Poke the beetle 5,000 times.'],
-    ].forEach(function (a, i) {
-      ach('clk' + i, a[1], a[2], function (s) { return s.clicks >= a[0]; });
-    });
-
-    COLONIES.forEach(function (g) {
-      [1, 20, 50, 120].forEach(function (n, i) {
-        const title = i === 0
-          ? 'First ' + g.name
-          : ['', 'A Score of ', 'Fifty ', 'A Legion of '][i] + plural(g.name);
-        ach('own_' + g.id + '_' + i, title,
-          'Own ' + n + ' ' + (n > 1 ? plural(g.name) : g.name) + '.',
-          function (s) { return (s.owned[g.id] || 0) >= n; });
+    BUILDINGS.forEach(function (b) {
+      [1, 15, 50].forEach(function (n, i) {
+        ach('own_' + b.id + '_' + i,
+          (i === 0 ? 'First ' + b.name : (i === 1 ? 'Fifteen ' : 'Fifty ') + b.name + 's'),
+          'Run ' + n + ' ' + b.name + (n > 1 ? 's' : '') + '.',
+          (s) => (s.owned[b.id] || 0) >= n);
       });
     });
 
-    MONUMENTS.forEach(function (m) {
-      ach('mon_' + m.id, m.name, 'Raise the ' + m.name + '.',
-        function (s) { return !!s.monuments[m.id]; });
+    RESOURCES.forEach(function (r) {
+      ach('full_' + r.id, r.name + ' To The Brim',
+        'Fill your ' + r.name + ' store completely.', (s) => !!s.filled[r.id]);
+    });
+
+    [
+      [1, 'First Order', "Fill one of the Queen's demands."],
+      [10, 'Reliable', 'Fill ten demands.'],
+      [30, 'Purveyor', 'Fill thirty demands.'],
+    ].forEach(function (a, i) {
+      ach('dem' + i, a[1], a[2], (s) => s.demandsFilled >= a[0]);
+    });
+
+    [
+      [5, 'On A Roll', 'Fill five demands in a row.'],
+      [12, 'Unbroken', 'Fill twelve demands in a row.'],
+    ].forEach(function (a, i) {
+      ach('streak' + i, a[1], a[2], (s) => s.bestStreak >= a[0]);
     });
 
     [
       [1, 'Sweet Tooth', 'Catch a Honey Bug.'],
-      [10, 'Sticky Fingers', 'Catch 10 Honey Bugs.'],
-      [40, 'Apiarist', 'Catch 40 Honey Bugs.'],
+      [12, 'Sticky Fingers', 'Catch twelve Honey Bugs.'],
     ].forEach(function (a, i) {
-      ach('gold' + i, a[1], a[2], function (s) { return s.goldens >= a[0]; });
+      ach('gold' + i, a[1], a[2], (s) => s.goldens >= a[0]);
     });
 
     [
       [1, 'Swatted', 'Drive off a raiding wasp.'],
-      [20, 'Pest Control', 'Drive off 20 raiding wasps.'],
+      [15, 'Pest Control', 'Drive off fifteen raiding wasps.'],
     ].forEach(function (a, i) {
-      ach('wasp' + i, a[1], a[2], function (s) { return s.wasps >= a[0]; });
+      ach('wasp' + i, a[1], a[2], (s) => s.wasps >= a[0]);
     });
+
+    ach('moth', 'Moonlight Visitor', 'Catch a pale moth.', (s) => s.moths >= 1);
 
     [
-      [10, 'Shopper', 'Buy 10 upgrades.'],
-      [30, 'Collector', 'Buy 30 upgrades.'],
-      [55, 'Completionist', 'Buy 55 upgrades.'],
+      [8, 'Tinkerer', 'Buy eight upgrades.'],
+      [24, 'Engineer', 'Buy twenty-four upgrades.'],
     ].forEach(function (a, i) {
-      ach('upg' + i, a[1], a[2], function (s) { return s.upgradeCount >= a[0]; });
+      ach('upg' + i, a[1], a[2], (s) => s.upgradeCount >= a[0]);
     });
 
-    [
-      [1, 'Lab Coat', 'File a study.'],
-      [3, 'Peer Reviewed', 'File three studies.'],
-      [6, 'Tenured', 'File every study.'],
-    ].forEach(function (a, i) {
-      ach('std' + i, a[1], a[2], function (s) { return s.studiesDone >= a[0]; });
+    MONUMENTS.forEach(function (m) {
+      ach('mon_' + m.id, m.name, 'Raise the ' + m.name + '.', (s) => !!s.monuments[m.id]);
     });
 
-    [
-      [50, 'Steady Trickle', 'Reach 50 bugs per second.'],
-      [500, 'Torrent', 'Reach 500 bugs per second.'],
-      [4000, 'Unstoppable', 'Reach 4,000 bugs per second.'],
-    ].forEach(function (a, i) {
-      ach('bps' + i, a[1], a[2], function (s) { return s.bps >= a[0]; });
-    });
-
-    ach('goal', 'A Million Little Legs', 'Hold 1,000,000 bugs at one time.',
-      function (s) { return s.bugs >= T.goal; });
+    ach('balanced', 'Nothing Starving',
+      'Have every building you own running at its full rate at once.', (s) => s.allFull);
+    ach('bps', 'Steady Hatch', 'Reach 500 bugs per second.', (s) => s.bps >= 500);
+    ach('goal', 'A Million Little Legs', 'Hold 1,000,000 bugs at one time.', (s) => s.bugs >= T.goal);
 
     /* ---------------- honey bug boons ---------------- */
     const BOONS = [
-      { id: 'frenzy', name: 'Frenzy', desc: 'All production x7 for 30 seconds.', weight: 32, mult: 7, seconds: 30 },
-      { id: 'swarm', name: 'Swarm', desc: 'All production x3 for 90 seconds.', weight: 26, mult: 3, seconds: 90 },
-      { id: 'windfall', name: 'Windfall', desc: 'A sudden heap of bugs.', weight: 30 },
-      { id: 'digits', name: 'Clicking Fever', desc: 'Poking is x77 for 15 seconds.', weight: 12, clickMult: 77, seconds: 15 },
+      { id: 'flow', name: 'Sap Flow', desc: 'Raw harvesting doubled for 45 seconds.', weight: 24, raw: 2, seconds: 45 },
+      { id: 'hum', name: 'Warm Hum', desc: 'Every building works twice as hard for 40 seconds.', weight: 22, all: 2, seconds: 40 },
+      { id: 'cache', name: 'Cache', desc: 'A sudden delivery of raw materials.', weight: 28, cache: true },
+      { id: 'tribute', name: 'Tribute', desc: 'A heap of bugs, on the house.', weight: 26, tribute: true },
+    ];
+
+    /* ---------------- weather ----------------
+     * Periodic swings the player has to notice and build around.
+     */
+    const WEATHER = [
+      { id: 'run', name: 'Sap Run', desc: 'Sap Tappers are twice as productive.', good: true, seconds: 70, building: 'sapTapper', mult: 2 },
+      { id: 'bloom', name: 'Bloom', desc: 'Pollen Gatherers are twice as productive.', good: true, seconds: 70, building: 'pollenGatherer', mult: 2 },
+      { id: 'damp', name: 'Damp Spell', desc: 'Termite Mounds are twice as productive.', good: true, seconds: 70, building: 'termiteMound', mult: 2 },
+      { id: 'drought', name: 'Drought', desc: 'Sap Tappers produce 45% less.', good: false, seconds: 55, building: 'sapTapper', mult: 0.55 },
+      { id: 'wilt', name: 'Wilt', desc: 'Leaf Cutters produce 45% less.', good: false, seconds: 55, building: 'leafCutter', mult: 0.55 },
+      { id: 'chill', name: 'Cold Snap', desc: 'Pollen Gatherers produce half as much.', good: false, seconds: 55, building: 'pollenGatherer', mult: 0.5 },
     ];
 
     return {
       TUNING: T,
       GOAL: T.goal,
       COST_GROWTH: T.costGrowth,
-      ACH_BONUS: T.achBonus,
-      COLONIES: COLONIES,
+      RESOURCE_COST_GROWTH: T.resourceCostGrowth,
+      RESOURCES: RESOURCES,
+      BUILDINGS: BUILDINGS,
       MONUMENTS: MONUMENTS,
       UPGRADES: UPGRADES,
-      STUDIES: STUDIES,
       ACHIEVEMENTS: ACHIEVEMENTS,
       BOONS: BOONS,
+      WEATHER: WEATHER,
+      RAW: ['sap', 'leaf'],
+      STAGES: 5,
     };
   }
 

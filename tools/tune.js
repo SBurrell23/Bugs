@@ -1,36 +1,36 @@
 /**
- * tune.js - sweeps the balance knobs in js/data.js and scores each candidate
- * on whether it makes a GOOD two-hour game, not merely a long one.
+ * tune.js - sweeps the balance knobs and scores each candidate on whether it
+ * makes a GOOD one-hour game, not merely a one-hour one.
  *
- * A run is only interesting if, at the moment of victory:
- *   - the casual profile lands near two hours
- *   - every colony is actually worth owning (nothing is dead content)
- *   - most upgrades have been bought
- *   - all three monuments are raised
- *   - final output is modest enough that the last million is a real push
+ * A candidate is only interesting if:
+ *   - a normal run lands near an hour
+ *   - bugs come from BOTH the brood and the Queen, so neither system is decoration
+ *   - every building is worth owning
+ *   - all three monuments get raised
+ *   - an away-from-keyboard run does NOT win, which is the whole point
  *   - the player is never left with nothing to buy for long
  *
- * Usage: node tools/tune.js [--top N]
+ * Usage: node tools/tune.js [--top N] [--quick]
  */
 'use strict';
 
-const API = require('../js/data.js');
-const { makeSim, fmt } = require('./simulate.js');
+const { run, fmt, num, pct } = require('./simulate');
 
-const TARGET = 7200;
+const TARGET = 3600;
 
-// costRatio is how much more each colony costs than the last.
-// kRatio is how much less efficient it is per bug spent, which is what stops
-// the economy running away. bpsRatio falls out of the two.
-const grid = {
-  costRatio: [6.0, 6.5, 7.2],
-  kRatio: [1.8, 2.0, 2.2],
-  kScale: [1.4, 1.9, 2.6, 3.4],
-  costGrowth: [1.10, 1.12],
-  globalMult: [1.22, 1.3],
-  monScale: [1.3],
-  studyMult: [1.12],
-  genUpScale: [1.5, 2.4],
+const FULL = {
+  broodYield: [22, 28, 36],
+  demandPay: [3, 4, 5],
+  demandCover: [22, 30],
+  costGrowth: [1.135, 1.155],
+  upgradeCostMult: [1, 1.6],
+};
+const QUICK = {
+  broodYield: [26, 32],
+  demandPay: [3.5, 4.5],
+  demandCover: [26],
+  costGrowth: [1.135],
+  upgradeCostMult: [1],
 };
 
 function* combos(g) {
@@ -44,94 +44,69 @@ function* combos(g) {
   }
 }
 
-function toTuning(c) {
-  const base = API.DEFAULT_TUNING;
-  return {
-    colonyBaseBps: 0.1 / c.kScale,
-    colonyCostRatio: c.costRatio,
-    colonyBpsRatio: c.costRatio / c.kRatio,
-    costGrowth: c.costGrowth,
-    globalMult: c.globalMult,
-    studyMult: c.studyMult,
-    monumentMults: [c.monScale, c.monScale + 0.08, c.monScale + 0.2],
-    genUpgradeCostMult: base.genUpgradeCostMult.map((m) => Math.round(m * c.genUpScale)),
-  };
-}
-
-function score(D, r) {
-  const s = r.s;
+function score(r) {
+  const s = r.stats;
   const win = r.marks.WIN;
   if (win === undefined) return null;
 
-  const deadColonies = D.COLONIES.filter((g) => s.owned[g.id] < 5).length;
-  const upgradeShare = s.bought.size / D.UPGRADES.length;
-  const monuments = Object.keys(s.monuments).length;
-
-  let prev = 0, idle = 0;
-  for (const t of s.buyTimes) { if (t - prev > idle) idle = t - prev; prev = t; }
+  const total = s.broodBugs + s.demandBugs;
+  const broodShare = total ? s.broodBugs / total : 0;
+  const dead = r.owned.filter((n) => n < 5).length;
 
   // penalties, lower is better
-  const timeMiss = Math.abs(Math.log(win / TARGET)) * 3;
-  const deadPenalty = deadColonies * 1.2;
-  const upgradePenalty = Math.max(0, 0.65 - upgradeShare) * 4;
-  const monumentPenalty = (3 - monuments) * 0.8;
-  const bpsPenalty = r.bps < 1200 || r.bps > 12000 ? Math.abs(Math.log(r.bps / 4000)) : 0;
-  const idlePenalty = Math.max(0, idle - 240) / 240;
-  const k0 = D.COLONIES[0].cost / D.COLONIES[0].bps;   // seconds to pay back the first colony
-  const openingPenalty = Math.max(0, Math.log(k0 / 240)) * 2.5;
+  const timeMiss = Math.abs(Math.log(win / TARGET)) * 4;
+  // both income sources should matter; 50/50 is ideal, either extreme is bad
+  const splitMiss = Math.abs(broodShare - 0.5) * 3;
+  const deadPenalty = dead * 1.5;
+  const monumentPenalty = (3 - s.monuments) * 1.0;
+  const idlePenalty = Math.max(0, r.idleGap - 300) / 300;
+  const bpsPenalty = s.bps < 1000 || s.bps > 25000
+    ? Math.abs(Math.log(s.bps / 5000)) : 0;
 
   return {
-    total: timeMiss + deadPenalty + upgradePenalty + monumentPenalty + bpsPenalty + idlePenalty + openingPenalty,
-    k0: k0,
-    win, deadColonies, upgradeShare, monuments, idle, bps: r.bps,
-    lifetime: s.lifetime, owned: D.COLONIES.map((g) => s.owned[g.id]),
+    total: timeMiss + splitMiss + deadPenalty + monumentPenalty + idlePenalty + bpsPenalty,
+    win, broodShare, dead, monuments: s.monuments, idleGap: r.idleGap,
+    bps: s.bps, upgrades: s.upgrades, upgradeTotal: s.upgradeTotal,
+    demands: s.demandsFilled,
   };
 }
 
+const grid = process.argv.includes('--quick') ? QUICK : FULL;
 const results = [];
-let tried = 0, reached = 0;
+let tried = 0;
 
 for (const c of combos(grid)) {
-  const tuning = toTuning(c);
-  const D = API.build(tuning);
-  const sim = makeSim(D);
   tried++;
-
-  const casual = sim.run('casual', 4242);
-  const sc = score(D, casual);
+  const r = run('normal', 4242, c);
+  const sc = score(r);
   if (!sc) continue;
-  reached++;
-
-  const active = sim.run('active', 4242);
-  const idleRun = sim.run('idle', 4242);
-  results.push({ c, tuning, sc, active: active.marks.WIN, idle: idleRun.marks.WIN });
+  results.push({ c, sc });
+  process.stderr.write('.');
 }
+process.stderr.write('\n');
 
 results.sort((a, b) => a.sc.total - b.sc.total);
 
-const topN = Number((process.argv.find((a) => a.startsWith('--top')) || '--top 10').split(/[ =]/)[1]) || 10;
+const topArg = process.argv.indexOf('--top');
+const topN = topArg >= 0 ? Number(process.argv[topArg + 1]) || 10 : 10;
 
-console.log('tried ' + tried + ', ' + reached + ' reached the goal within the time limit\n');
-console.log('score  casual   active     idle    endBps  upg  mon dead  idleGap   K0  settings');
+console.log('tried ' + tried + ', ' + results.length + ' finished\n');
+console.log('score    win    brood%  mon dead   endBps  demands  upgrades  settings');
 for (const r of results.slice(0, topN)) {
   console.log(
     r.sc.total.toFixed(2).padStart(5) +
-    fmt(r.sc.win).padStart(8) +
-    fmt(r.active).padStart(9) +
-    fmt(r.idle).padStart(9) +
-    ('' + Math.round(r.sc.bps)).padStart(9) +
-    (Math.round(r.sc.upgradeShare * 100) + '%').padStart(5) +
-    ('' + r.sc.monuments).padStart(4) +
-    ('' + r.sc.deadColonies).padStart(5) +
-    fmt(r.sc.idle).padStart(9) + ('' + Math.round(r.sc.k0)).padStart(6) + '  ' +
+    fmt(r.sc.win).padStart(9) +
+    pct(r.sc.broodShare).padStart(8) +
+    (r.sc.monuments + '/3').padStart(5) +
+    String(r.sc.dead).padStart(5) +
+    num(r.sc.bps).padStart(9) +
+    String(r.sc.demands).padStart(9) +
+    (r.sc.upgrades + '/' + r.sc.upgradeTotal).padStart(10) + '   ' +
     Object.entries(r.c).map(([k, v]) => k + '=' + v).join(' ')
   );
 }
 
 if (results.length) {
-  const best = results[0];
-  console.log('\nbest candidate owns: ' + best.sc.owned.join(' / ') +
-    '  (lifetime ' + (best.sc.lifetime / 1e6).toFixed(2) + 'M)');
   console.log('\ntuning block:');
-  console.log(JSON.stringify(best.tuning, null, 2));
+  console.log(JSON.stringify(results[0].c, null, 2));
 }

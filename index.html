@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bugs</title>
-<meta name="description" content="An incremental game about a very small problem that gets much bigger.">
+<meta name="description" content="A production-chain game about a rotting log. Balance sap, leaf, pollen, honeydew, fungus and wax to reach a million bugs.">
 <link rel="icon" type="image/png" href="assets/img/ant.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,7 +13,7 @@
 </head>
 <body>
 
-<!-- bugs crawl around back here -->
+<!-- bugs crawl around up here, over everything -->
 <div id="crawl-layer" aria-hidden="true"></div>
 <div id="vignette" aria-hidden="true"></div>
 
@@ -24,7 +24,7 @@
       <img id="brand-bug" alt="" width="32" height="32">
       <div class="brand-text">
         <h1>BUGS</h1>
-        <p id="tagline">a very small problem</p>
+        <p id="tagline">mind the chain</p>
       </div>
     </div>
 
@@ -40,9 +40,11 @@
       <button id="music-toggle" class="chip" aria-pressed="false" title="Background music">Music: off</button>
       <input id="music-vol" class="slider" type="range" min="0" max="100" value="45" aria-label="Music volume">
       <button id="sfx-toggle" class="chip" aria-pressed="true" title="Sound effects">Sound: on</button>
-      <button id="critter-toggle" class="chip" aria-pressed="true" title="Bugs crawling on screen">Critters: on</button>
     </div>
   </header>
+
+  <!-- the six silos, always visible -->
+  <div id="resource-bar" aria-label="Stores"></div>
 
   <main id="board">
 
@@ -51,29 +53,56 @@
       <div id="counter-card" class="card">
         <div id="bug-count">0</div>
         <div id="bug-word">bugs</div>
-        <div id="bps-line"><span id="bps">0.0</span> per second</div>
+        <div id="bps-line"><span id="bps">0</span> hatching per second</div>
       </div>
 
-      <div id="log-stage">
+      <div id="log-stage" class="card">
+        <h3 class="card-head">Forage by hand</h3>
+        <div id="forage-pick" role="group" aria-label="What to gather"></div>
         <div id="log-slab">
-          <button id="hero-btn" type="button" aria-label="Poke the beetle to collect bugs">
+          <button id="hero-btn" type="button" aria-label="Gather by hand">
             <img id="hero-img" alt="" width="64" height="64" draggable="false">
           </button>
           <div id="hero-glow" aria-hidden="true"></div>
         </div>
-        <p id="click-info"><span id="click-value">1</span> per poke</p>
+        <p id="click-info"><span id="click-value">0</span> per go</p>
       </div>
 
-      <div id="boon-bar" aria-live="polite"></div>
+      <div id="status-strip"></div>
 
       <div id="feed-card" class="card">
-        <h3>Field Log</h3>
+        <h3 class="card-head">Field Log</h3>
         <ul id="feed" aria-live="polite"></ul>
       </div>
     </section>
 
-    <!-- ---------------- middle: tabs ---------------- -->
+    <!-- ---------------- middle: the chain ---------------- -->
     <section id="col-mid" class="column">
+      <div id="chain-head">
+        <h2>The Chain</h2>
+        <div id="buy-amount" role="group" aria-label="Purchase quantity">
+          <button class="qty active" data-qty="1">x1</button>
+          <button class="qty" data-qty="5">x5</button>
+          <button class="qty" data-qty="max">max</button>
+        </div>
+      </div>
+      <p class="panel-hint">
+        Each building eats what the one above it makes. A building runs at the
+        rate of its worst-supplied ingredient, so watch for anything going red.
+      </p>
+      <div id="building-list"></div>
+    </section>
+
+    <!-- ---------------- right: the queen, then everything else ------------ -->
+    <section id="col-right" class="column">
+      <div id="demand-card" class="card">
+        <div id="demand-head">
+          <h2>The Queen Wants</h2>
+          <span id="streak-chip" title="Filled in a row">streak 0</span>
+        </div>
+        <div id="demand-list"></div>
+      </div>
+
       <nav id="tabs" role="tablist" aria-label="Sections">
         <button class="tab active" role="tab" data-panel="upgrades" aria-selected="true">
           Upgrades <span class="badge" id="badge-upgrades">0</span>
@@ -81,7 +110,6 @@
         <button class="tab" role="tab" data-panel="monuments" aria-selected="false">
           Monuments <span class="badge" id="badge-monuments">0</span>
         </button>
-        <button class="tab" role="tab" data-panel="lab" aria-selected="false">Lab</button>
         <button class="tab" role="tab" data-panel="awards" aria-selected="false">
           Awards <span class="badge" id="badge-awards">0</span>
         </button>
@@ -90,24 +118,16 @@
 
       <div id="panels">
         <div class="panel active" id="panel-upgrades" role="tabpanel">
-          <p class="panel-hint">One-off improvements. Each one is permanent.</p>
           <div id="upgrade-grid" class="grid"></div>
-          <p class="empty" id="upgrades-empty">Nothing new yet. Keep collecting.</p>
+          <p class="empty" id="upgrades-empty">Nothing new yet. Keep the chain moving.</p>
         </div>
 
         <div class="panel" id="panel-monuments" role="tabpanel">
-          <p class="panel-hint">Three landmarks. Expensive, permanent, and they change the rules.</p>
+          <p class="panel-hint">Three landmarks. Expensive, permanent, and each one changes a rule.</p>
           <div id="monument-list"></div>
         </div>
 
-        <div class="panel" id="panel-lab" role="tabpanel">
-          <p class="panel-hint">Studies take real time to run. Something should always be on the bench.</p>
-          <div id="lab-active"></div>
-          <div id="study-list"></div>
-        </div>
-
         <div class="panel" id="panel-awards" role="tabpanel">
-          <p class="panel-hint">Every award nudges all production up a little. They add up.</p>
           <div id="award-grid"></div>
         </div>
 
@@ -122,19 +142,6 @@
       </div>
     </section>
 
-    <!-- ---------------- right: colonies ---------------- -->
-    <section id="col-right" class="column">
-      <div id="colony-head">
-        <h2>Colonies</h2>
-        <div id="buy-amount" role="group" aria-label="Purchase quantity">
-          <button class="qty active" data-qty="1">x1</button>
-          <button class="qty" data-qty="10">x10</button>
-          <button class="qty" data-qty="max">max</button>
-        </div>
-      </div>
-      <div id="colony-list"></div>
-    </section>
-
   </main>
 </div>
 
@@ -143,11 +150,12 @@
   <div id="gate-card">
     <img id="gate-bug" alt="" width="64" height="64">
     <h2>BUGS</h2>
-    <p>You have found a rotting log. There is something underneath it.</p>
-    <p class="fine">Poke the beetle to collect bugs. Spend bugs to get more bugs.
-       Reach one million and the log is yours.</p>
+    <p>You have found a rotting log. Something underneath it is organised.</p>
+    <div id="gate-chain"></div>
+    <p class="fine">Tap sap and leaf out of the log, refine them, and feed the brood.
+      The Queen will keep asking for things. Reach one million bugs.</p>
     <button id="gate-btn" class="btn primary">Lift the log</button>
-    <p class="fine muted">Includes music and sound effects. Both can be turned off at any time.</p>
+    <p class="fine muted">Has music and sound. Both can be turned off at any time.</p>
   </div>
 </div>
 
@@ -167,6 +175,7 @@
 <audio id="music" loop preload="auto" src="assets/audio/bug-theme.mp3"></audio>
 
 <script src="js/data.js"></script>
+<script src="js/chain.js"></script>
 <script src="js/format.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/sprites.js"></script>

@@ -101,6 +101,60 @@
     "h": 32,
     "from": "generators.sprites.js"
   },
+  "resSap": {
+    "file": "assets/img/resSap.png",
+    "w": 24,
+    "h": 24,
+    "from": "resources.sprites.js"
+  },
+  "resLeaf": {
+    "file": "assets/img/resLeaf.png",
+    "w": 24,
+    "h": 24,
+    "from": "resources.sprites.js"
+  },
+  "resPollen": {
+    "file": "assets/img/resPollen.png",
+    "w": 24,
+    "h": 24,
+    "from": "resources.sprites.js"
+  },
+  "resHoneydew": {
+    "file": "assets/img/resHoneydew.png",
+    "w": 24,
+    "h": 24,
+    "from": "resources.sprites.js"
+  },
+  "resFungus": {
+    "file": "assets/img/resFungus.png",
+    "w": 24,
+    "h": 24,
+    "from": "resources.sprites.js"
+  },
+  "resWax": {
+    "file": "assets/img/resWax.png",
+    "w": 24,
+    "h": 24,
+    "from": "resources.sprites.js"
+  },
+  "iconScroll": {
+    "file": "assets/img/iconScroll.png",
+    "w": 16,
+    "h": 16,
+    "from": "resources.sprites.js"
+  },
+  "iconSilo": {
+    "file": "assets/img/iconSilo.png",
+    "w": 16,
+    "h": 16,
+    "from": "resources.sprites.js"
+  },
+  "iconSpeed": {
+    "file": "assets/img/iconSpeed.png",
+    "w": 16,
+    "h": 16,
+    "from": "resources.sprites.js"
+  },
   "heroBeetle": {
     "file": "assets/img/heroBeetle.png",
     "w": 64,

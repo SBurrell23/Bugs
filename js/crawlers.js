@@ -23,7 +23,6 @@
   let visitors = [];
   let asked = 0;
   let want = 0;
-  let enabled = true;
   let running = false;
   let last = 0;
 
@@ -73,23 +72,11 @@
   function setPopulation(n) {
     asked = Math.max(0, Math.min(MAX, Math.floor(n)));
     want = fitToScreen(asked);
-    if (!enabled) return;
     while (crawlers.length < want) crawlers.push(makeCrawler());
     while (crawlers.length > want) {
       const c = crawlers.pop();
       if (c && c.el.parentNode) c.el.parentNode.removeChild(c.el);
     }
-  }
-
-  function clearAll() {
-    crawlers.forEach((c) => { if (c.el.parentNode) c.el.parentNode.removeChild(c.el); });
-    crawlers = [];
-  }
-
-  function setEnabled(v) {
-    enabled = !!v;
-    if (!enabled) clearAll();
-    else setPopulation(asked);   // asked, not want: want is already screen-scaled
   }
 
   function stepCrawler(c, dt, t) {
@@ -241,7 +228,7 @@
     last = ts;
     const t = ts / 1000;
 
-    if (enabled) for (const c of crawlers) stepCrawler(c, dt, t);
+    for (const c of crawlers) stepCrawler(c, dt, t);
     for (let i = visitors.length - 1; i >= 0; i--) stepVisitor(visitors[i], dt, t);
 
     requestAnimationFrame(frame);
@@ -261,9 +248,8 @@
   });
 
   root.BUGS_CRAWLERS = {
-    begin, setPopulation, setEnabled, spawnVisitor,
+    begin, setPopulation, spawnVisitor,
     get population() { return crawlers.length; },
-    get enabled() { return enabled; },
     clearVisitors() { visitors.slice().forEach(remove); },
   };
 })(typeof self !== 'undefined' ? self : this);
