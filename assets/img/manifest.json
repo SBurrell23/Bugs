@@ -226,5 +226,35 @@
     "w": 16,
     "h": 16,
     "from": "ui.sprites.js"
+  },
+  "leafcutter": {
+    "file": "assets/img/leafcutter.png",
+    "w": 32,
+    "h": 32,
+    "from": "workers.sprites.js"
+  },
+  "termiteWorker": {
+    "file": "assets/img/termiteWorker.png",
+    "w": 32,
+    "h": 32,
+    "from": "workers.sprites.js"
+  },
+  "honeyBee": {
+    "file": "assets/img/honeyBee.png",
+    "w": 32,
+    "h": 32,
+    "from": "workers.sprites.js"
+  },
+  "waxScale": {
+    "file": "assets/img/waxScale.png",
+    "w": 32,
+    "h": 32,
+    "from": "workers.sprites.js"
+  },
+  "grub": {
+    "file": "assets/img/grub.png",
+    "w": 32,
+    "h": 32,
+    "from": "workers.sprites.js"
   }
 }
