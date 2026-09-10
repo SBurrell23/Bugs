@@ -123,10 +123,24 @@
    * ================================================================== */
 
   /**
-   * Bugs needed to fully crew every one of a building you own. Each extra
-   * building needs crewGrowth times as much crew as the one before it, the
-   * same way its resource cost climbs, so labour stays scarce as you scale.
+   * Bugs needed to fully crew every one of a building you own.
+   *
+   * Two things drive it. Each extra building needs crewGrowth times the crew
+   * of the one before it, the same way its resource cost climbs. And the whole
+   * figure scales with the size of the colony, because a crew is a share of
+   * your bugs rather than a fixed headcount.
+   *
+   * That second part is load-bearing. Population is an integral over the whole
+   * run and reaches a million; building count is a level and stops around a
+   * hundred. Without tying crew to population the two drift three orders of
+   * magnitude apart, every building sits permanently at full crew, and
+   * assigning bugs stops being a decision at all. The exponent is kept below 1
+   * so output still grows as the colony grows -- crew demand just grows slower.
    */
+  function colonyScale() {
+    return Math.pow(Math.max(1, s.bugs / D.STARTING_BUGS), D.CREW_POP_EXP);
+  }
+
   function crewNeeded(id) {
     const n = s.owned[id] || 0;
     if (n <= 0) return 0;
@@ -134,7 +148,7 @@
     const g = D.CREW_GROWTH;
     const raw = b.stage === 0 && s.monuments.cicadaChorus ? 0.67 : 1;
     const total = b.crew * (Math.pow(g, n) - 1) / (g - 1);
-    return Math.max(1, Math.ceil(total * upgradeSets().handsM[id] * raw));
+    return Math.max(1, Math.ceil(total * colonyScale() * upgradeSets().handsM[id] * raw));
   }
 
   /** 0..1 - the share of its crew a building actually has. */
@@ -886,7 +900,7 @@
     on, emit,
     load, save, wipe, exportSave, importSave, runAway,
     tick, forage, setForageTarget, forageValue,
-    assign, setAssign, autoStaff, recallAll, crewNeeded, staffing, idleBugs,
+    assign, setAssign, autoStaff, recallAll, crewNeeded, staffing, idleBugs, colonyScale,
     buyBuilding, buildingCost, buildingMax, wantQty, buildingUnlocked,
     buyUpgrade, upgradeVisible, availableUpgrades,
     buyMonument, monumentVisible,

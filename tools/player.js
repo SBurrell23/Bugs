@@ -162,8 +162,11 @@ function makePlayer(G, D, profileName) {
     if (total <= 0) return;
 
     if (prof.sloppy) {
-      // dumps everyone into the first jobs it thinks of and leaves them there
-      for (const x of needs) G.setAssign(x.id, x.need);
+      // Builds badly, but does what a careless human actually does when the
+      // colony looks wrong: mashes Auto-assign. Testing bad BUILDING is the
+      // point; a profile that also refuses the recovery button in the UI is
+      // measuring stubbornness, not balance.
+      G.autoStaff();
       return;
     }
     const f = Math.min(1, Math.floor(G.state.bugs) / total);

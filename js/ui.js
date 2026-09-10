@@ -70,12 +70,27 @@
     setTimeout(() => d.remove(), 1050);
   }
 
-  /** "120 sap, 40 wax" from a cost object. */
+  /** "120 sap, 40 wax" from a cost object, as plain text. */
   function costText(cost) {
     return Object.keys(cost).map(function (res) {
       const n = F.fmt(cost[res]);
       return n + ' ' + (res === 'bugs' ? 'bugs' : RES[res].name.toLowerCase());
     }).join(', ');
+  }
+
+  /**
+   * The same, but the resource name is replaced by its icon. Each icon carries
+   * data-res so the delegated handler below can name it on hover -- the icons
+   * are unlabelled otherwise, and guessing is not a mechanic.
+   */
+  function costHtml(cost) {
+    return Object.keys(cost).map(function (res) {
+      const n = F.fmt(cost[res]);
+      if (res === 'bugs') return '<span class="cost-part">' + n + ' bugs</span>';
+      return '<span class="cost-part">' + n +
+        '<img class="cost-icon" data-res="' + res + '" src="' + S.url(RES[res].sprite) +
+        '" alt="' + RES[res].name + '"></span>';
+    }).join('');
   }
 
   /* ---------------- tooltip ---------------- */
@@ -105,7 +120,31 @@
   }
   const hideTip = () => { if (tip) tip.classList.remove('on'); };
 
+  /**
+   * Cost icons sit inside buttons that already have their own tooltip, so
+   * hovering one takes the tooltip over and hands it straight back on the way
+   * out rather than fighting the parent for it.
+   */
+  function wireCostIcons() {
+    document.addEventListener('mouseover', function (ev) {
+      const icon = ev.target.closest && ev.target.closest('.cost-icon[data-res]');
+      if (!icon) return;
+      const r = RES[icon.dataset.res];
+      if (!r) return;
+      showTip('<h4>' + r.name + '</h4><p class="tip-flavour">' + r.blurb + '</p>', ev);
+    });
+    document.addEventListener('mouseout', function (ev) {
+      const icon = ev.target.closest && ev.target.closest('.cost-icon[data-res]');
+      if (!icon) return;
+      let node = icon.parentElement;
+      while (node && !node.__tip) node = node.parentElement;
+      if (node) showTip(node.__tip(), { clientX: ev.clientX, clientY: ev.clientY });
+      else hideTip();
+    });
+  }
+
   function wireTip(node, build) {
+    node.__tip = build;
     node.addEventListener('mouseenter', (ev) => showTip(build(), ev));
     node.addEventListener('mousemove', moveTip);
     node.addEventListener('mouseleave', hideTip);
@@ -119,7 +158,7 @@
   function costLine(cost) {
     const ok = G.canPay(cost);
     const blocked = G.capBlocked(cost);
-    let html = '<div class="tip-cost' + (ok ? '' : ' no') + '">' + costText(cost) + '</div>';
+    let html = '<div class="tip-cost' + (ok ? '' : ' no') + '">' + costHtml(cost) + '</div>';
     if (blocked.length) {
       html += '<p class="tip-flavour">Your ' +
         blocked.map((r) => RES[r].name).join(' and ') +
@@ -267,7 +306,8 @@
             (ins.length ? 'takes <b>' + ins.join(' and ') + '</b> a second and ' : '') +
             'makes <b>' + (outs.join(' and ') || 'nothing on its own') + '</b> a second.</p>' +
           '<p>Your ' + b.name + 's want <b>' + F.commas(nextCrew) + '</b> bugs to run at full tilt. ' +
-          'Each one you add wants more crew than the last.</p>' +
+          'Each one you add wants more crew than the last, and crews grow with the ' +
+          'size of the colony, so you will never staff everything at once.</p>' +
           costLine(cost);
       });
 
@@ -369,7 +409,7 @@
       buy.disabled = false;
       buy.classList.toggle('afford', can);
       buy.childNodes[0].nodeValue = qty > 1 ? 'Build x' + qty : 'Build';
-      buy.querySelector('.price').textContent = costText(cost);
+      buy.querySelector('.price').innerHTML = costHtml(cost);
 
       const idle = G.idleBugs();
       d.querySelectorAll('.crew-btns button').forEach(function (t) {
@@ -579,7 +619,7 @@
       b.classList.toggle('afford', can);
       cost.classList.remove('raised');
       cost.classList.toggle('no', !can);
-      cost.textContent = costText(m.cost);
+      cost.innerHTML = costHtml(m.cost);
       if (can) ready++;
     });
     setBadge(el.badgeMonuments, ready);
@@ -1074,6 +1114,7 @@
     buildGateChain();
 
     wire();
+    wireCostIcons();
     subscribe();
 
     const set = G.state.settings;

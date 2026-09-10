@@ -127,7 +127,7 @@ for (const seed of SEEDS) {
   // resources without wrecking the run and is not reliably slower. That is a
   // real weakness in the current balance, and hiding it behind a lenient
   // threshold would be worse than printing it.
-  sloppyDelta.push(sloppy.marks.WIN === undefined ? 1 : sloppy.marks.WIN / win);
+  sloppyDelta.push(sloppy.marks.WIN === undefined ? null : sloppy.marks.WIN / win);
 
   check(tag + ': poor balancing is still winnable',
     sloppy.marks.WIN !== undefined,
@@ -163,9 +163,15 @@ if (normalTimes.length) {
   console.log('\nmean normal run: ' + fmt(avg) + '   (spread ' + fmt(lo) + ' to ' + fmt(hi) + ')');
 }
 if (sloppyDelta.length) {
-  const d = sloppyDelta.reduce((a, b) => a + b, 0) / sloppyDelta.length;
-  console.log('random building takes ' + Math.round(d * 100) + '% as long as building to ratio' +
-    (d < 1.05 ? '   <- not punished enough; over-building should cost more' : ''));
+  const done = sloppyDelta.filter((x) => x !== null);
+  if (!done.length) {
+    console.log('random building never finished a run at all');
+  } else {
+    const d = done.reduce((a, b) => a + b, 0) / done.length;
+    console.log('random building takes ' + Math.round(d * 100) + '% as long as building to ratio' +
+      (sloppyDelta.length > done.length ? ' (and failed ' + (sloppyDelta.length - done.length) + ' run(s))' : '') +
+      (d < 1.05 ? '   <- not punished enough; over-building should cost more' : ''));
+  }
 }
 
 if (failures.length) {

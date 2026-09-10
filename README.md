@@ -32,10 +32,19 @@ harvesters take no inputs and always run.
 ### Bugs are labour
 
 Every building needs a **crew**, and a half-crewed building works at half speed.
-Bugs are never spent, so the population counter only ever climbs — but crew
-demand climbs geometrically with how many of a building you own, the same way
-its resource cost does, so labour stays scarce instead of going free once the
-population takes off.
+Bugs are never spent, so the population counter only ever climbs.
+
+Crew demand is driven by two things: each extra building needs more crew than
+the last, and the whole figure **scales with the size of the colony**, because
+a crew is a share of your bugs rather than a fixed headcount. That second part
+is load-bearing. Population is an integral over the whole run and reaches a
+million; building count is a level and stops around a hundred. Tie crew only to
+building count and the two drift three orders of magnitude apart — every
+building sits permanently at full crew and assigning bugs stops being a
+decision. The exponent is kept below 1 so output still grows as you grow.
+
+In practice you can staff roughly a quarter of what you own. **You never get to
+max everything.**
 
 Moving bugs between jobs is free and instant. It is the main thing you do.
 
@@ -97,11 +106,9 @@ random building takes 89% as long as building to ratio
   orders. It sits near 50%, so neither system is decoration.
 - **afk** never finishes, at any timescale. It misses every order and dies at
   one Sap Tapper. That is the design working.
-- **sloppy** buys by gut feel instead of by ratio. It is **not reliably
-  slower**, and the gate prints that rather than hiding it. Crews make
-  over-building self-limiting — a building nobody staffs simply sits idle — so
-  a random builder wastes resources without wrecking the run. Over-building
-  should cost more than it currently does; that is the next thing to fix.
+- **sloppy** buys by gut feel instead of by ratio, then mashes Auto-assign the
+  way a careless player would. It takes **281% as long**. Once labour is
+  genuinely scarce, building things you cannot crew is expensive.
 
 `check-balance.js` asserts all of that plus a static check that no cost can
 ever exceed what a silo is able to hold, and it gates every deploy.
@@ -202,9 +209,7 @@ not an idle game.
 
 ## Known rough edges
 
-- Run length swings a fair way with order luck: 52 to 85 minutes across seeds,
-  mean 63. Tightening that means making order rewards depend less on chance.
-- Over-building is under-punished (see above). Crews absorb the mistake too
-  gracefully.
-- Late game the population far exceeds the number of jobs, so crew assignment
-  stops biting once you are past a few hundred thousand bugs.
+- Run length still moves with order luck, though much less than it did: 56 to
+  62 minutes across seeds, mean 60.
+- Only one or two of the three monuments get raised in a typical run. The third
+  wants full silos and often arrives after the goal does.

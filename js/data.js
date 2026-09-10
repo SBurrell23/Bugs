@@ -35,7 +35,13 @@
     startingBugs: 12,
     costGrowth: 1.13,       // resource cost per extra building
     crewGrowth: 1.055,      // crew demand per extra building
-    broodYield: 30,         // bugs a second from one fully crewed Brood Chamber
+    // A crew is a SHARE of the colony, not a fixed headcount: running the same
+    // works with ten times the bugs takes more hands to coordinate. Population
+    // is an integral over the whole run while crew demand is a level, so
+    // without this the two drift orders of magnitude apart and staffing stops
+    // being a decision. Kept below 1 so output still grows as you grow.
+    crewPopExp: 0.7,
+    broodYield: 52,         // bugs a second from one fully crewed Brood Chamber
     demandEvery: [30, 50],
     demandWindow: 110,
     demandCover: 30,
@@ -405,6 +411,7 @@
       STARTING_BUGS: T.startingBugs,
       COST_GROWTH: T.costGrowth,
       CREW_GROWTH: T.crewGrowth,
+      CREW_POP_EXP: T.crewPopExp,
       RESOURCES: RESOURCES,
       BUILDINGS: BUILDINGS,
       MONUMENTS: MONUMENTS,

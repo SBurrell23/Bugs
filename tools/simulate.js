@@ -33,6 +33,7 @@ function run(profileName, seed, tuning) {
   const trace = [];
   const buyTimes = [];
   let starvedTicks = 0, totalTicks = 0, boredTicks = 0;
+  let tightTicks = 0, idleShareSum = 0;
   let boredRun = 0, worstBoredRun = 0;
   let lastBuildings = 0;
 
@@ -76,6 +77,13 @@ function run(profileName, seed, tuning) {
     if (built !== lastBuildings) { buyTimes.push(t); lastBuildings = built; }
 
     totalTicks++;
+    {
+      const pop = Math.max(1, Math.floor(st.bugs));
+      const share = G.idleBugs() / pop;
+      idleShareSum += share;
+      // labour is "tight" when most of the colony is actually employed
+      if (share < 0.25) tightTicks++;
+    }
     if (nothingToDo()) {
       boredTicks++;
       boredRun += DT;
@@ -118,6 +126,8 @@ function run(profileName, seed, tuning) {
     profile: profileName, marks, stats, state: st, D, trace, t,
     idleGap,
     starvedShare: totalTicks ? starvedTicks / totalTicks : 0,
+    tightShare: totalTicks ? tightTicks / totalTicks : 0,
+    meanIdleShare: totalTicks ? idleShareSum / totalTicks : 0,
     boredShare: totalTicks ? boredTicks / totalTicks : 0,
     worstBoredRun,
     owned: D.BUILDINGS.map((b) => st.owned[b.id]),
@@ -161,6 +171,9 @@ function report(r, showTrace) {
     ' | longest gap with no purchase ' + fmt(r.idleGap));
   console.log('  NOTHING TO DO ' + pct(r.boredShare) + ' of the run' +
     ' | worst unbroken stretch ' + fmt(r.worstBoredRun));
+  console.log('  LABOUR TIGHT ' + pct(r.tightShare) + ' of the run' +
+    ' | mean idle share ' + pct(r.meanIdleShare) +
+    ' | at the end ' + num(r.stats.idle) + ' idle vs ' + num(r.stats.crew) + ' at work');
 
   if (showTrace) {
     console.log('  ' + 'time'.padEnd(7) + 'bugs'.padStart(9) + 'bps'.padStart(9) +

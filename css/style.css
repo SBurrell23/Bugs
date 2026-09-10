@@ -64,6 +64,22 @@ body::before {
 }
 
 img { image-rendering: pixelated; -webkit-user-drag: none; user-select: none; }
+
+/* scrollbars, in bark and chitin like everything else */
+* { scrollbar-width: thin; scrollbar-color: var(--bark-300) var(--loam-800); }
+::-webkit-scrollbar { width: 13px; height: 13px; }
+::-webkit-scrollbar-track {
+  background: var(--loam-800);
+  border-left: 1px solid var(--bark-400);
+}
+::-webkit-scrollbar-thumb {
+  border-radius: 7px;
+  border: 3px solid var(--loam-800);
+  background: var(--bark-300);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--chitin); }
+::-webkit-scrollbar-thumb:active { background: var(--amber-dim); }
+::-webkit-scrollbar-corner { background: var(--loam-800); }
 h1, h2, h3 { margin: 0; font-weight: 800; }
 ::selection { background: var(--amber-dim); color: #150f08; }
 
@@ -365,8 +381,7 @@ h1, h2, h3 { margin: 0; font-weight: 800; }
 @keyframes slidein { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
 
 /* ---------- the chain --------------------------------------------------- */
-#chain-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-#chain-head h2 { font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: var(--ink-dim); }
+#chain-head { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 #buy-amount { display: flex; gap: 4px; }
 .qty {
   font: inherit; font-size: 12px; font-weight: 800; color: var(--ink-faint);
@@ -433,7 +448,15 @@ h1, h2, h3 { margin: 0; font-weight: 800; }
   border: 1px solid var(--bark-300); background: var(--loam-500); color: var(--ink-dim);
   text-align: center;
 }
-.bld-buy .price { display: block; font-family: "Press Start 2P", monospace; font-size: 9.5px; margin-top: 4px; color: #b8674c; }
+.bld-buy .price {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 6px;
+  font-family: "Press Start 2P", monospace; font-size: 9.5px;
+  margin-top: 5px; color: #b8674c;
+}
+.cost-part { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.cost-icon { width: 15px; height: 15px; cursor: help; vertical-align: middle; }
+.mon-cost { display: flex !important; flex-wrap: wrap; gap: 8px; }
+.tip-cost { display: flex; flex-wrap: wrap; gap: 8px; }
 .bld-buy.afford { border-color: var(--moss); color: var(--ink); }
 .bld-buy.afford .price { color: var(--moss); }
 .bld-buy.afford:hover { background: #3b4a1f; }
