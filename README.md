@@ -46,13 +46,19 @@ decision. The exponent is kept below 1 so output still grows as you grow.
 In practice you can staff roughly a quarter of what you own. **You never get to
 max everything.**
 
+The amber bar on each building *is* the control: drag the handle to set that
+building to any share of its crew. The filled part always shows what is really
+crewed, so dragging past the bugs you actually have leaves the handle out ahead
+of the fill and then snaps back — which is the clearest way to say "you do not
+have the bugs for this".
+
 Moving bugs between jobs is free and instant. It is the main thing you do.
 
 ### The levers
 
 | Lever | What it does |
 |---|---|
-| **Crew assignment** | The main dial. Every bug on the sap tap is a bug not in the brood. |
+| **Crew assignment** | The main dial. Drag the amber bar on any building to set what share of its crew it gets. Every bug on the sap tap is a bug not in the brood. |
 | **Building counts** | Getting the ratios right is the other half of the game. |
 | **Silo caps** | Anything produced past the brim is **thrown away**. Overproduction is a real cost. |
 | **Foraging** | Gather sap or leaf by hand to plug a gap or finish an order. |

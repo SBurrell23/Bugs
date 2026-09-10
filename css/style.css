@@ -434,14 +434,13 @@ h1, h2, h3 { margin: 0; font-weight: 800; }
 .io.short { border-color: #8a4227; background: #2a1109; }
 .io-arrow { color: var(--ink-faint); font-weight: 800; }
 
-.bld-eff, .bld-crewbar { position: relative; height: 6px; border-radius: 4px; background: #0d0905; margin-top: 5px; overflow: hidden; border: 1px solid #33261a; }
-.bld-crew-fill { height: 100%; width: 0; background: linear-gradient(90deg, #7a5f2c, var(--amber)); transition: width .2s linear; }
+.bld-eff { position: relative; height: 6px; border-radius: 4px; background: #0d0905; margin-top: 6px; overflow: hidden; border: 1px solid #33261a; }
 .bld-eff-fill { height: 100%; width: 100%; background: linear-gradient(90deg, var(--moss-dim), var(--moss)); transition: width .2s linear; }
 .bld.starved .bld-eff-fill { background: linear-gradient(90deg, #8a3f2c, #c2542f); }
 .bld-note { font-size: 11.5px; margin-top: 5px; color: var(--ink-faint); min-height: 15px; }
 .bld-note.warn { color: #dd8f70; }
 
-.bld-side { display: flex; flex-direction: column; gap: 6px; align-items: stretch; min-width: 132px; }
+.bld-side { display: flex; flex-direction: column; gap: 6px; align-items: stretch; min-width: 116px; }
 .bld-buy {
   font: inherit; font-size: 12px; font-weight: 800; line-height: 1.35;
   padding: 7px 10px; border-radius: 8px; cursor: pointer;
@@ -462,21 +461,57 @@ h1, h2, h3 { margin: 0; font-weight: 800; }
 .bld-buy.afford:hover { background: #3b4a1f; }
 .bld-buy:disabled { cursor: not-allowed; }
 
-/* crew controls */
-.crew { display: flex; flex-direction: column; gap: 4px; }
+/* ---------- the crew slider: the bar IS the control ---------- */
+.bld-crewrow { display: flex; align-items: center; gap: 9px; margin-top: 6px; }
 .crew-fig {
-  text-align: center; font-family: "Press Start 2P", monospace; font-size: 10px;
-  color: var(--ink);
+  font-family: "Press Start 2P", monospace; font-size: 9px;
+  color: var(--ink); white-space: nowrap;
 }
 .crew-of { color: var(--ink-faint); }
-.crew-btns { display: flex; gap: 2px; }
-.crew-btns button {
-  flex: 1; font: inherit; font-size: 10px; font-weight: 800;
-  padding: 4px 0; border-radius: 5px; cursor: pointer;
-  border: 1px solid var(--bark-400); background: var(--loam-700); color: var(--ink-dim);
+
+.crew-slider {
+  -webkit-appearance: none; appearance: none;
+  flex: 1; min-width: 0; height: 14px; margin: 0;
+  background: transparent; cursor: grab;
 }
-.crew-btns button:hover:not(:disabled) { color: #14100a; background: var(--chitin); border-color: var(--chitin); }
-.crew-btns button:disabled { opacity: .32; cursor: not-allowed; }
+.crew-slider:active { cursor: grabbing; }
+.crew-slider:disabled { opacity: .35; cursor: not-allowed; }
+
+/* the track carries the fill, driven by --pct from the actual crew */
+.crew-slider::-webkit-slider-runnable-track {
+  height: 14px; border-radius: 7px;
+  border: 1px solid #33261a;
+  background: linear-gradient(90deg,
+    #7a5f2c 0, var(--amber) var(--pct, 0%), #0d0905 var(--pct, 0%), #0d0905 100%);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, .6);
+}
+.crew-slider::-moz-range-track {
+  height: 14px; border-radius: 7px;
+  border: 1px solid #33261a;
+  background: linear-gradient(90deg,
+    #7a5f2c 0, var(--amber) var(--pct, 0%), #0d0905 var(--pct, 0%), #0d0905 100%);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, .6);
+}
+
+.crew-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 18px; height: 18px; margin-top: -3px;
+  border-radius: 50%;
+  border: 1px solid #4a3410;
+  background: radial-gradient(circle at 35% 30%, #fff3cd, var(--honey) 55%, var(--amber-dim));
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .6);
+}
+.crew-slider::-moz-range-thumb {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  border: 1px solid #4a3410;
+  background: radial-gradient(circle at 35% 30%, #fff3cd, var(--honey) 55%, var(--amber-dim));
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .6);
+}
+.crew-slider:hover::-webkit-slider-thumb { filter: brightness(1.12); }
+.crew-slider:hover::-moz-range-thumb { filter: brightness(1.12); }
+.crew-slider:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--honey); outline-offset: 2px; }
+.crew-slider:focus-visible::-moz-range-thumb { outline: 2px solid var(--honey); outline-offset: 2px; }
 
 /* the idle pool, under the counter */
 #crew-line { margin-top: 8px; font-size: 13px; color: var(--ink-dim); }
@@ -746,7 +781,7 @@ h1, h2, h3 { margin: 0; font-weight: 800; }
   .bld-art { width: 44px; height: 44px; }
   .bld-art img { width: 34px; height: 34px; }
   .bld-side { grid-column: 1 / -1; flex-direction: row; }
-  .bld-side .bld-buy, .bld-side .thr { flex: 1; }
+  .bld-side .bld-buy { flex: 1; }
   .mon { grid-template-columns: 1fr; }
   #panels { min-height: 0; }
 }

@@ -22,6 +22,7 @@
   const BLD = Object.fromEntries(D.BUILDINGS.map((b) => [b.id, b]));
 
   let tip = null;
+  let dragging = null;   // the crew slider currently under the pointer, if any
 
   /* ====================================================================== *
    * helpers
@@ -265,22 +266,15 @@
           '<div class="bld-top"><span class="bld-name"></span><span class="bld-own">0</span></div>' +
           '<div class="bld-io"></div>' +
           '<div class="bld-eff" title="Supply"><div class="bld-eff-fill"></div></div>' +
-          '<div class="bld-crewbar" title="Crew"><div class="bld-crew-fill"></div></div>' +
+          '<div class="bld-crewrow">' +
+            '<input class="crew-slider" type="range" min="0" max="100" step="1" value="0">' +
+            '<span class="crew-fig"><span class="crew-has">0</span>' +
+              '<span class="crew-of"> / </span><span class="crew-need">0</span></span>' +
+          '</div>' +
           '<div class="bld-note"></div>' +
         '</div>' +
         '<div class="bld-side">' +
           '<button class="bld-buy" type="button">Build<span class="price"></span></button>' +
-          '<div class="crew">' +
-            '<div class="crew-fig"><span class="crew-has">0</span>' +
-              '<span class="crew-of"> / </span><span class="crew-need">0</span></div>' +
-            '<div class="crew-btns" role="group" aria-label="Crew">' +
-              '<button type="button" data-d="-10">-10</button>' +
-              '<button type="button" data-d="-1">-1</button>' +
-              '<button type="button" data-d="1">+1</button>' +
-              '<button type="button" data-d="10">+10</button>' +
-              '<button type="button" data-d="max">max</button>' +
-            '</div>' +
-          '</div>' +
         '</div>';
 
       d.querySelector('.bld-art').appendChild(S.make(b.sprite, 42));
@@ -311,15 +305,18 @@
           costLine(cost);
       });
 
-      d.querySelectorAll('.crew-btns button').forEach(function (t) {
-        t.addEventListener('click', function () {
-          const moved = t.dataset.d === 'max'
-            ? G.assign(b.id, G.crewNeeded(b.id))
-            : G.assign(b.id, Number(t.dataset.d));
-          if (moved) A.sfx.tick(); else A.sfx.deny();
-          refreshAll();
-        });
+      const slider = d.querySelector('.crew-slider');
+      slider.setAttribute('aria-label', 'Crew for ' + b.name);
+      slider.addEventListener('pointerdown', function () { dragging = slider; });
+      slider.addEventListener('input', function () {
+        const need = G.crewNeeded(b.id);
+        const before = G.state.assigned[b.id] || 0;
+        G.setAssign(b.id, Math.round(need * Number(slider.value) / 100));
+        if ((G.state.assigned[b.id] || 0) !== before) A.sfx.tick();
+        refreshBuildings();
+        refreshHeader();
       });
+      slider.addEventListener('change', function () { dragging = null; refreshAll(); });
 
       el['bld_' + b.id] = d;
       host.appendChild(d);
@@ -369,8 +366,6 @@
       d.querySelector('.bld-io').innerHTML = parts.join('');
 
       d.querySelector('.bld-eff-fill').style.width = Math.round(eff * 100) + '%';
-      d.querySelector('.bld-crew-fill').style.width =
-        Math.round(G.staffing(b.id) * 100) + '%';
 
       const note = d.querySelector('.bld-note');
       const has = st.assigned[b.id] || 0;
@@ -411,13 +406,15 @@
       buy.childNodes[0].nodeValue = qty > 1 ? 'Build x' + qty : 'Build';
       buy.querySelector('.price').innerHTML = costHtml(cost);
 
-      const idle = G.idleBugs();
-      d.querySelectorAll('.crew-btns button').forEach(function (t) {
-        const v = t.dataset.d;
-        t.disabled = owned === 0 || (v === 'max'
-          ? (has >= need || idle <= 0)
-          : Number(v) > 0 ? (idle <= 0 || has >= need) : has <= 0);
-      });
+      // The filled part of the track always shows what is ACTUALLY crewed. The
+      // thumb only snaps to it when the player is not mid-drag, so dragging
+      // past the bugs you have leaves the thumb ahead of the fill, which is
+      // exactly the feedback you want at that moment.
+      const slider = d.querySelector('.crew-slider');
+      const pct = Math.round(staff * 100);
+      slider.style.setProperty('--pct', pct + '%');
+      slider.disabled = owned === 0;
+      if (slider !== dragging) slider.value = pct;
     });
   }
 
@@ -1046,6 +1043,9 @@
     });
 
     window.addEventListener('resize', hideTip);
+    window.addEventListener('pointerup', function () {
+      if (dragging) { dragging = null; refreshAll(); }
+    });
   }
 
   function resetSigs() {
