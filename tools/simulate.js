@@ -32,8 +32,37 @@ function run(profileName, seed, tuning) {
   const mark = (k, cond) => { if (marks[k] === undefined && cond) marks[k] = t; };
   const trace = [];
   const buyTimes = [];
-  let starvedTicks = 0, totalTicks = 0;
+  let starvedTicks = 0, totalTicks = 0, boredTicks = 0;
+  let boredRun = 0, worstBoredRun = 0;
   let lastBuildings = 0;
+
+  function nothingToDo() {
+    const st = G.state;
+    const caps = G.caps();
+    // is hand gathering pointless right now?
+    const rawFull = D.RAW.every((r) => st.stocks[r] >= caps[r] * 0.97);
+    if (!rawFull) return false;
+    // can we buy anything at all?
+    for (const b of D.BUILDINGS) {
+      if (G.buildingUnlocked(b.id) && G.canPay(G.buildingCost(b.id, 1))) return false;
+    }
+    for (const u of G.availableUpgrades()) if (G.canPay(u.cost)) return false;
+    for (const m of D.MONUMENTS) if (!st.monuments[m.id] && G.canPay(m.cost)) return false;
+    // is there anywhere left to put a bug?
+    if (G.idleBugs() > 0) {
+      for (const b of D.BUILDINGS) {
+        if (st.owned[b.id] > 0 && G.staffing(b.id) < 0.999) return false;
+      }
+    }
+    // is there an order we could actually finish?
+    for (const d of st.demands) {
+      const rem = G.demandRemaining(d);
+      let can = true;
+      for (const r in rem) if (st.stocks[r] < rem[r]) { can = false; break; }
+      if (can) return false;
+    }
+    return true;
+  }
 
   let t = 0;
   for (; t < MAX_SECONDS; t += DT) {
@@ -47,6 +76,11 @@ function run(profileName, seed, tuning) {
     if (built !== lastBuildings) { buyTimes.push(t); lastBuildings = built; }
 
     totalTicks++;
+    if (nothingToDo()) {
+      boredTicks++;
+      boredRun += DT;
+      if (boredRun > worstBoredRun) worstBoredRun = boredRun;
+    } else boredRun = 0;
     const ch = G.chain;
     if (ch) {
       const owned = D.BUILDINGS.filter((b) => st.owned[b.id] > 0);
@@ -84,6 +118,8 @@ function run(profileName, seed, tuning) {
     profile: profileName, marks, stats, state: st, D, trace, t,
     idleGap,
     starvedShare: totalTicks ? starvedTicks / totalTicks : 0,
+    boredShare: totalTicks ? boredTicks / totalTicks : 0,
+    worstBoredRun,
     owned: D.BUILDINGS.map((b) => st.owned[b.id]),
   };
 }
@@ -123,6 +159,8 @@ function report(r, showTrace) {
     ', wasted ' + num(s.wasted) + ' to overflow, stolen ' + num(s.stolen));
   console.log('  chain starved ' + pct(r.starvedShare) + ' of ticks' +
     ' | longest gap with no purchase ' + fmt(r.idleGap));
+  console.log('  NOTHING TO DO ' + pct(r.boredShare) + ' of the run' +
+    ' | worst unbroken stretch ' + fmt(r.worstBoredRun));
 
   if (showTrace) {
     console.log('  ' + 'time'.padEnd(7) + 'bugs'.padStart(9) + 'bps'.padStart(9) +

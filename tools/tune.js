@@ -19,18 +19,16 @@ const { run, fmt, num, pct } = require('./simulate');
 const TARGET = 3600;
 
 const FULL = {
-  broodYield: [22, 28, 36],
-  demandPay: [3, 4, 5],
-  demandCover: [22, 30],
-  costGrowth: [1.135, 1.155],
-  upgradeCostMult: [1, 1.6],
+  broodYield: [9, 14, 20],
+  demandPay: [2.4, 3.2],
+  costGrowth: [1.12, 1.13],
+  crewGrowth: [1.07, 1.08],
 };
 const QUICK = {
-  broodYield: [26, 32],
-  demandPay: [3.5, 4.5],
-  demandCover: [26],
-  costGrowth: [1.135],
-  upgradeCostMult: [1],
+  broodYield: [14, 20],
+  demandPay: [2.8],
+  costGrowth: [1.13],
+  crewGrowth: [1.075],
 };
 
 function* combos(g) {

@@ -6,6 +6,9 @@
  * both call it, so a balance run in the terminal is playing exactly the game
  * the player plays.
  *
+ * Buildings are crewed, not switched on: ctx.staff[id] is the share of the crew
+ * a building actually has, and a building with half its crew does half the work.
+ *
  * How a tick resolves
  * -------------------
  * Buildings sit in stages that form a DAG (raw harvesters, converters, the
@@ -42,7 +45,7 @@
    * @param D    the built data module
    * @param ctx  {
    *   owned:   { buildingId: count }
-   *   throttle:{ buildingId: 0 | 0.5 | 1 }
+   *   staff:   { buildingId: 0..1 }  share of the crew this building needs
    *   stocks:  { resourceId: amount }
    *   caps:    { resourceId: amount }
    *   actM:    { buildingId: multiplier }  scales inputs AND outputs (running harder)
@@ -76,8 +79,10 @@
 
     D.BUILDINGS.forEach(function (b) {
       const n = ctx.owned[b.id] || 0;
-      const th = ctx.throttle[b.id] === undefined ? 1 : ctx.throttle[b.id];
-      const a = n * th * (ctx.actM[b.id] || 1);
+      // A half-crewed building runs at half speed, so staffing multiplies the
+      // effective unit count exactly the way a throttle used to.
+      const st = ctx.staff[b.id] === undefined ? 1 : ctx.staff[b.id];
+      const a = n * st * (ctx.actM[b.id] || 1);
       act[b.id] = a;
       const w = {};
       if (a > 0) {

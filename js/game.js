@@ -1,18 +1,22 @@
 /* ==========================================================================
    game.js - state, economy and rules. Knows nothing about the DOM.
 
-   Bugs come from two places, and the split is deliberate:
-     - Brood Chambers, which tick along on their own
-     - the Queen's demands, which have to be filled by hand
-   The demands are the larger share, which is what stops the game from
-   playing itself while you are away from the keyboard.
+   Bugs are labour. They are never spent, only employed, so the population
+   counter only ever climbs. Everything is bought with resources, which is
+   what the crews produce.
+
+   The two things that grow the population:
+     - Brood Chambers, which hatch bugs as long as they are crewed and fed
+     - the Queen's orders, which have to be filled by hand
+   Neither runs itself, which is what stops the game playing itself while you
+   are away from the keyboard.
    ========================================================================== */
 (function (root) {
   'use strict';
 
   const D = root.BUGS_DATA;
   const CHAIN = root.BUGS_CHAIN;
-  const SAVE_KEY = 'bugs.save.v3';
+  const SAVE_KEY = 'bugs.save.v4';
 
   const OFFLINE_CAP = 15 * 60;   // this is not an idle game; catch-up is small
   const OFFLINE_RATE = 0.4;
@@ -21,8 +25,6 @@
   const WASP_EVERY = [150, 260];
   const MOTH_EVERY = [190, 330];
   const WEATHER_EVERY = [95, 170];
-
-  const STARTING_BUGS = 25;
 
   const byId = (list) => Object.fromEntries(list.map((x) => [x.id, x]));
   const BUILDING = byId(D.BUILDINGS);
@@ -35,42 +37,35 @@
   const nowMs = () => Date.now();
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-  /* ---------------- events ---------------- */
   const handlers = {};
   const on = (n, fn) => (handlers[n] = handlers[n] || []).push(fn);
   const emit = (n, p) => (handlers[n] || []).forEach((fn) => fn(p));
 
-  /* ---------------- state ---------------- */
   let s = null;
-  let last = null;      // most recent chain result, for the UI
+  let last = null;
   let demandSeq = 1;
 
   function freshState() {
-    const owned = {}, throttle = {}, stocks = {}, filled = {};
-    D.BUILDINGS.forEach((b) => { owned[b.id] = 0; throttle[b.id] = 1; });
+    const owned = {}, assigned = {}, stocks = {}, filled = {};
+    D.BUILDINGS.forEach((b) => { owned[b.id] = 0; assigned[b.id] = 0; });
     D.RESOURCES.forEach((r) => { stocks[r.id] = 0; filled[r.id] = false; });
     return {
-      v: 3,
-      bugs: STARTING_BUGS,
-      lifetime: STARTING_BUGS,
-      spent: 0,
+      v: 4,
+      bugs: D.STARTING_BUGS,
+      lifetime: D.STARTING_BUGS,
       forages: 0,
       foraged: 0,
-      forageTarget: 'sap',
-      owned, throttle, stocks, filled,
+      forageTarget: 'leaf',
+      owned, assigned, stocks, filled,
       upgrades: {}, monuments: {}, awards: {},
       demands: [],
-      demandsFilled: 0,
-      demandsMissed: 0,
-      demandBugs: 0,
-      broodBugs: 0,
-      streak: 0,
-      bestStreak: 0,
-      nextDemandIn: 16,
+      demandsFilled: 0, demandsMissed: 0,
+      demandBugs: 0, broodBugs: 0, titheBugs: 0, tithes: 0,
+      streak: 0, bestStreak: 0,
+      nextDemandIn: 14,
       weather: null,
       boons: [],
-      goldens: 0, waspsSwatted: 0, waspsMissed: 0, moths: 0, stolen: 0,
-      wasted: 0,
+      goldens: 0, waspsSwatted: 0, waspsMissed: 0, moths: 0, stolen: 0, wasted: 0,
       milestones: {},
       bestBps: 0,
       won: false, wonAt: null,
@@ -88,9 +83,9 @@
    * ================================================================== */
 
   function upgradeSets() {
-    const yieldM = {}, thriftM = {}, capM = {};
+    const yieldM = {}, thriftM = {}, handsM = {}, capM = {};
     let global = 1, forage = 1, queen = 1;
-    D.BUILDINGS.forEach((b) => { yieldM[b.id] = 1; thriftM[b.id] = 1; });
+    D.BUILDINGS.forEach((b) => { yieldM[b.id] = 1; thriftM[b.id] = 1; handsM[b.id] = 1; });
     D.RESOURCES.forEach((r) => { capM[r.id] = 1; });
 
     for (const id in s.upgrades) {
@@ -98,12 +93,13 @@
       if (!u) continue;
       if (u.kind === 'yield') yieldM[u.target] *= u.mult;
       else if (u.kind === 'thrift') thriftM[u.target] *= (1 - u.save);
+      else if (u.kind === 'hands') handsM[u.target] *= (1 - u.save);
       else if (u.kind === 'cap') capM[u.target] *= u.mult;
       else if (u.kind === 'global') global *= u.mult;
       else if (u.kind === 'forage') forage *= u.mult;
       else if (u.kind === 'queen') queen *= u.mult;
     }
-    return { yieldM, thriftM, capM, global, forage, queen };
+    return { yieldM, thriftM, handsM, capM, global, forage, queen };
   }
 
   function boonFlags() {
@@ -122,29 +118,134 @@
     return out;
   }
 
-  /** Everything the chain resolver needs, assembled from state. */
+  /* ================================================================== *
+   * crews - the heart of it
+   * ================================================================== */
+
+  /**
+   * Bugs needed to fully crew every one of a building you own. Each extra
+   * building needs crewGrowth times as much crew as the one before it, the
+   * same way its resource cost climbs, so labour stays scarce as you scale.
+   */
+  function crewNeeded(id) {
+    const n = s.owned[id] || 0;
+    if (n <= 0) return 0;
+    const b = BUILDING[id];
+    const g = D.CREW_GROWTH;
+    const raw = b.stage === 0 && s.monuments.cicadaChorus ? 0.67 : 1;
+    const total = b.crew * (Math.pow(g, n) - 1) / (g - 1);
+    return Math.max(1, Math.ceil(total * upgradeSets().handsM[id] * raw));
+  }
+
+  /** 0..1 - the share of its crew a building actually has. */
+  function staffing(id) {
+    const need = crewNeeded(id);
+    if (need <= 0) return 0;
+    return clamp((s.assigned[id] || 0) / need, 0, 1);
+  }
+
+  const totalAssigned = () =>
+    D.BUILDINGS.reduce((a, b) => a + (s.assigned[b.id] || 0), 0);
+
+  const idleBugs = () => Math.max(0, Math.floor(s.bugs) - totalAssigned());
+
+  /** Move bugs on or off a job. Returns how many actually moved. */
+  function assign(id, delta) {
+    if (!BUILDING[id]) return 0;
+    const have = s.assigned[id] || 0;
+    let want = delta;
+    if (want > 0) {
+      want = Math.min(want, idleBugs(), Math.max(0, crewNeeded(id) - have));
+    } else {
+      want = -Math.min(-want, have);
+    }
+    if (!want) return 0;
+    s.assigned[id] = have + want;
+    emit('assigned', { id, delta: want });
+    return want;
+  }
+
+  function setAssign(id, n) {
+    return assign(id, Math.round(n) - (s.assigned[id] || 0));
+  }
+
+  /**
+   * Spread every idle bug across the jobs that still want crew, in proportion
+   * to how short each one is. Convenience, not a strategy: it fills gaps
+   * evenly rather than cleverly.
+   */
+  function autoStaff() {
+    let moved = 0;
+    for (let pass = 0; pass < 4; pass++) {
+      const gaps = D.BUILDINGS
+        .map((b) => ({ id: b.id, gap: Math.max(0, crewNeeded(b.id) - (s.assigned[b.id] || 0)) }))
+        .filter((x) => x.gap > 0);
+      const totalGap = gaps.reduce((a, x) => a + x.gap, 0);
+      const spare = idleBugs();
+      if (!totalGap || spare <= 0) break;
+      for (const x of gaps) {
+        const share = Math.floor(spare * (x.gap / totalGap));
+        moved += assign(x.id, Math.max(share > 0 ? share : 0, 0));
+      }
+      // hand out any remainder one at a time
+      for (const x of gaps) {
+        if (idleBugs() <= 0) break;
+        moved += assign(x.id, 1);
+      }
+    }
+    if (moved) emit('autoStaff', moved);
+    return moved;
+  }
+
+  /** Pull every bug off every job. */
+  function recallAll() {
+    let moved = 0;
+    D.BUILDINGS.forEach((b) => { moved += -assign(b.id, -(s.assigned[b.id] || 0)); });
+    emit('recall', moved);
+    return moved;
+  }
+
+  /** Assignments can exceed need after a building is sold or a perk lands. */
+  function trimAssignments() {
+    D.BUILDINGS.forEach(function (b) {
+      const need = crewNeeded(b.id);
+      if ((s.assigned[b.id] || 0) > need) s.assigned[b.id] = need;
+    });
+    const over = totalAssigned() - Math.floor(s.bugs);
+    if (over > 0) {
+      let left = over;
+      for (const b of D.BUILDINGS) {
+        if (left <= 0) break;
+        const take = Math.min(left, s.assigned[b.id] || 0);
+        s.assigned[b.id] -= take;
+        left -= take;
+      }
+    }
+  }
+
+  /* ================================================================== *
+   * chain context
+   * ================================================================== */
+
   function context() {
     const u = upgradeSets();
     const boon = boonFlags();
     const hive = s.monuments.hiveSingularity ? MONUMENT.hiveSingularity.mult : 1;
-    const harvest = s.monuments.cicadaChorus ? 1.33 : 1;
 
-    const actM = {}, yieldM = {}, thriftM = {};
+    const actM = {}, yieldM = {}, thriftM = {}, staff = {};
     D.BUILDINGS.forEach((b) => {
-      actM[b.id] = u.global * hive * boon.all;
-
-      let y = u.yieldM[b.id];
-      const raw = b.stage === 0;
-      if (raw) y *= harvest * boon.raw;
+      actM[b.id] = boon.all;
+      let y = u.yieldM[b.id] * u.global * hive;
+      if (b.stage === 0) y *= boon.raw;
       if (s.weather && s.weather.building === b.id) y *= s.weather.mult;
       yieldM[b.id] = y;
-
       thriftM[b.id] = u.thriftM[b.id];
+      staff[b.id] = staffing(b.id);
     });
 
     return {
       owned: s.owned,
-      throttle: s.throttle,
+      staff,
       stocks: s.stocks,
       caps: caps(),
       actM, yieldM, thriftM,
@@ -152,23 +253,13 @@
     };
   }
 
-  /** Gross output rate per resource right now, used to size demands. */
-  function outputRates() {
-    const r = last || CHAIN.resolve(D, context(), 0.05);
-    return r.produced;
-  }
-
+  const outputRates = () => (last || CHAIN.resolve(D, context(), 0.05)).produced;
   const bps = () => (last ? last.bugsRate : 0);
 
-  /**
-   * What one building type is actually moving right now, after throttle,
-   * multipliers and starvation. The UI shows these on the building card.
-   */
   function buildingRates(id) {
     const b = BUILDING[id];
     const ctx = context();
-    const th = s.throttle[id] === undefined ? 1 : s.throttle[id];
-    const a = (s.owned[id] || 0) * th * ctx.actM[id];
+    const a = (s.owned[id] || 0) * ctx.staff[id] * ctx.actM[id];
     const e = last ? (last.eff[id] || 0) : 0;
     const ins = {}, outs = {};
     for (const res in b.inputs) ins[res] = a * b.inputs[res] * ctx.thriftM[id] * e;
@@ -179,7 +270,6 @@
     };
   }
 
-  /** What a single extra unit would add, at full supply. Used in tooltips. */
   function unitRates(id) {
     const b = BUILDING[id];
     const ctx = context();
@@ -192,23 +282,12 @@
     };
   }
 
-  /** Which of a building's inputs are the ones holding it back. */
-  function blockers(id) {
-    if (!last) return [];
-    return CHAIN.blockers(D, BUILDING[id], last);
-  }
+  const blockers = (id) => (last ? CHAIN.blockers(D, BUILDING[id], last) : []);
 
   /* ================================================================== *
-   * costs and buying
+   * costs - resources only, because bugs are never spent
    * ================================================================== */
 
-  /**
-   * Bug costs climb steeply, and that is the brake on the whole game. The
-   * resource part of a cost is a stockpile gate rather than a brake, so it
-   * climbs gently AND is clamped to half of what the silo can currently hold.
-   * Without that clamp a late building eventually asks for more of a resource
-   * than can physically be stored, and quietly becomes unbuyable.
-   */
   function buildingCost(id, qty) {
     const b = BUILDING[id];
     const k = s.owned[id];
@@ -216,52 +295,33 @@
     const out = {};
     for (const res in b.cost) out[res] = 0;
     for (let i = 0; i < qty; i++) {
-      const bugF = Math.pow(D.COST_GROWTH, k + i);
-      const resF = Math.pow(D.RESOURCE_COST_GROWTH, k + i);
+      const f = Math.pow(D.COST_GROWTH, k + i);
       for (const res in b.cost) {
-        if (res === 'bugs') {
-          out.bugs += Math.ceil(b.cost.bugs * bugF);
-        } else {
-          const ceiling = Math.floor(c[res] * 0.5);
-          out[res] += Math.min(ceiling, Math.ceil(b.cost[res] * resF));
-        }
+        out[res] += Math.min(Math.floor(c[res] * 0.75), Math.ceil(b.cost[res] * f));
       }
     }
     return out;
   }
 
-  /**
-   * Resources in a cost that simply will not fit in the silo you have. The UI
-   * uses this to say "your store is too small" instead of "you cannot afford".
-   */
-  function capBlocked(cost) {
-    const c = caps();
-    const out = [];
-    for (const res in cost) {
-      if (res === 'bugs') continue;
-      if (cost[res] > c[res]) out.push(res);
-    }
-    return out;
-  }
-
   function canPay(cost) {
-    for (const res in cost) {
-      const have = res === 'bugs' ? s.bugs : s.stocks[res];
-      if (have < cost[res]) return false;
-    }
+    for (const res in cost) if ((s.stocks[res] || 0) < cost[res]) return false;
     return true;
   }
 
   function pay(cost) {
-    for (const res in cost) {
-      if (res === 'bugs') { s.bugs -= cost[res]; s.spent += cost[res]; }
-      else s.stocks[res] -= cost[res];
-    }
+    for (const res in cost) s.stocks[res] -= cost[res];
+  }
+
+  function capBlocked(cost) {
+    const c = caps();
+    const out = [];
+    for (const res in cost) if (cost[res] > c[res]) out.push(res);
+    return out;
   }
 
   function buildingMax(id) {
     let n = 0;
-    while (n < 500 && canPay(buildingCost(id, n + 1))) n++;
+    while (n < 200 && canPay(buildingCost(id, n + 1))) n++;
     return n;
   }
 
@@ -274,8 +334,8 @@
     const b = BUILDING[id];
     if (s.owned[id] > 0) return true;
     if (b.index <= 1) return true;
-    // it shows up once you could plausibly be thinking about it
-    return s.lifetime >= b.cost.bugs * 0.5;
+    const prev = D.BUILDINGS[b.index - 1];
+    return s.owned[prev.id] > 0;
   }
 
   function buyBuilding(id, qty) {
@@ -286,13 +346,9 @@
     if (!canPay(cost)) return 0;
     pay(cost);
     s.owned[id] += n;
+    // a new building starts unstaffed; the player decides who moves
     emit('built', { id, qty: n });
     return n;
-  }
-
-  function setThrottle(id, v) {
-    s.throttle[id] = clamp(v, 0, 1);
-    emit('throttle', { id, v: s.throttle[id] });
   }
 
   function upgradeVisible(u) {
@@ -302,40 +358,45 @@
     return true;
   }
 
-  const availableUpgrades = () =>
-    D.UPGRADES.filter(upgradeVisible).sort((a, b) => (a.cost.bugs || 0) - (b.cost.bugs || 0));
+  const availableUpgrades = () => D.UPGRADES.filter(upgradeVisible)
+    .sort((a, b) => valueOf(a.cost) - valueOf(b.cost));
+
+  const valueOf = (cost) => {
+    let v = 0;
+    for (const r in cost) v += cost[r] * (RESOURCE[r] ? RESOURCE[r].value : 1);
+    return v;
+  };
 
   function buyUpgrade(id) {
     const u = UPGRADE[id];
     if (!u || s.upgrades[id] || !upgradeVisible(u) || !canPay(u.cost)) return false;
     pay(u.cost);
     s.upgrades[id] = true;
+    trimAssignments();
     emit('upgrade', u);
     return true;
   }
 
   const monumentVisible = (id) =>
-    s.monuments[id] || s.lifetime >= MONUMENT[id].cost.bugs * 0.3;
+    s.monuments[id] || s.lifetime >= (id === 'mantisTemple' ? 3000 : id === 'cicadaChorus' ? 40000 : 200000);
 
   function buyMonument(id) {
     const m = MONUMENT[id];
     if (!m || s.monuments[id] || !canPay(m.cost)) return false;
     pay(m.cost);
     s.monuments[id] = true;
+    trimAssignments();
     emit('monument', m);
     return true;
   }
 
   /* ================================================================== *
-   * foraging - the click
+   * foraging
    * ================================================================== */
 
   function forageValue() {
     const u = upgradeSets();
     const boon = boonFlags();
-    // Hand gathering scales with the log so it never stops being useful, but a
-    // click is worth a few seconds of output, not a firehose. The silo cap
-    // limits it further, which is what stops click-spam being a strategy.
     const rate = outputRates()[s.forageTarget] || 0;
     return (1.5 + rate * 0.5) * u.forage * boon.raw;
   }
@@ -343,44 +404,44 @@
   function forage() {
     const res = s.forageTarget;
     const cap = caps()[res];
-    const gain = forageValue();
     const before = s.stocks[res];
-    s.stocks[res] = Math.min(cap, before + gain);
+    s.stocks[res] = Math.min(cap, before + forageValue());
     s.forages++;
-    s.foraged += s.stocks[res] - before;
-    return { res, gain: s.stocks[res] - before, full: s.stocks[res] >= cap };
+    const got = s.stocks[res] - before;
+    s.foraged += got;
+    return { res, gain: got, full: s.stocks[res] >= cap - 0.01 };
   }
 
-  function setForageTarget(res) {
-    if (D.RAW.indexOf(res) >= 0) s.forageTarget = res;
-  }
+  const setForageTarget = (res) => { if (D.RAW.indexOf(res) >= 0) s.forageTarget = res; };
 
   /* ================================================================== *
-   * the Queen's demands
+   * the Queen
    * ================================================================== */
 
-  const demandSlots = () => (s.monuments.mantisTemple ? 2 : 1);
-  const streakMult = () =>
-    Math.min(D.TUNING.streakMax, 1 + s.streak * D.TUNING.streakStep);
+  const demandSlots = () => D.TUNING.demandSlots + (s.monuments.mantisTemple ? 1 : 0);
+  const streakMult = () => Math.min(D.TUNING.streakMax, 1 + s.streak * D.TUNING.streakStep);
+
+  function gainBugs(n, bucket) {
+    if (!(n > 0)) return 0;
+    s.bugs += n;
+    s.lifetime = s.bugs;
+    if (bucket) s[bucket] += n;
+    return n;
+  }
 
   function makeDemand() {
     const rates = outputRates();
     const u = upgradeSets();
+    const c = caps();
 
-    const pool = D.RESOURCES.filter(function (r) {
-      if (D.RAW.indexOf(r.id) >= 0) return true;          // always forageable
-      return (rates[r.id] || 0) > 0.03;
-    });
+    const pool = D.RESOURCES.filter((r) =>
+      D.RAW.indexOf(r.id) >= 0 || (rates[r.id] || 0) > 0.03);
     if (!pool.length) return null;
 
-    // ask for more kinds of thing as the operation grows
-    const reach = pool.length;
-    const count = clamp(1 + Math.floor(Math.random() * Math.min(reach, 3)), 1, 3);
-
+    const count = clamp(1 + Math.floor(Math.random() * Math.min(pool.length, 3)), 1, 3);
     const chosen = [];
     const bag = pool.slice();
     for (let i = 0; i < count && bag.length; i++) {
-      // weight toward the deeper resources, which are the interesting asks
       const weights = bag.map((r) => 1 + r.tier * 0.9);
       let roll = Math.random() * weights.reduce((a, b) => a + b, 0);
       let idx = 0;
@@ -393,21 +454,28 @@
     chosen.forEach(function (r) {
       const raw = D.RAW.indexOf(r.id) >= 0;
       const rate = Math.max(rates[r.id] || 0, raw ? 0.6 : 0.05);
-      const qty = Math.max(raw ? 12 : 5,
-        Math.ceil(rate * D.TUNING.demandCover * rnd(0.65, 1.25) / count));
+      // Sized on flow OR on storage, whichever is larger, then capped to what a
+      // silo can actually hold. An order you cannot physically hold reads as
+      // impossible, and reading as impossible is the same as being impossible.
+      const byFlow = rate * D.TUNING.demandCover;
+      const byStore = c[r.id] * D.TUNING.demandStore;
+      const qty = Math.max(raw ? 20 : 8, Math.min(
+        Math.floor(c[r.id] * 0.85),
+        Math.ceil(Math.max(byFlow, byStore) * rnd(0.75, 1.15) / count)));
       need[r.id] = qty;
-      value += qty * r.value;
+      // Sub-linear in quantity. Orders are sized against your output, so a
+      // player who spams the cheapest producer would otherwise inflate their
+      // own payouts; this makes doubling a pile pay well short of double.
+      value += Math.pow(qty, 0.85) * r.value;
     });
 
     const hive = s.monuments.hiveSingularity ? 1.25 : 1;
     const window = D.TUNING.demandWindow * (s.monuments.hiveSingularity ? 1.5 : 1);
-    const reward = Math.ceil(value * D.TUNING.demandPay * u.queen * streakMult() * hive);
-
     return {
       id: 'd' + (demandSeq++),
       need,
       given: Object.fromEntries(Object.keys(need).map((k) => [k, 0])),
-      reward,
+      reward: Math.ceil(value * D.TUNING.demandPay * u.queen * streakMult() * hive),
       window,
       expiresAt: nowMs() + window * 1000,
     };
@@ -421,22 +489,20 @@
     emit('demandNew', d);
   }
 
-  const demandRemaining = (d) => {
+  function demandRemaining(d) {
     const out = {};
     for (const res in d.need) out[res] = Math.max(0, d.need[res] - d.given[res]);
     return out;
-  };
+  }
 
   const demandComplete = (d) => {
     for (const res in d.need) if (d.given[res] < d.need[res]) return false;
     return true;
   };
 
-  /** Push whatever is in the silos into a demand. Partial deliveries count. */
   function deliver(id) {
     const d = s.demands.find((x) => x.id === id);
     if (!d) return null;
-
     let moved = 0;
     for (const res in d.need) {
       const want = d.need[res] - d.given[res];
@@ -447,16 +513,12 @@
       d.given[res] += take;
       moved += take;
     }
-
     if (!demandComplete(d)) {
       if (moved > 0) emit('demandPartial', { demand: d, moved });
       return { done: false, moved };
     }
-
     s.demands = s.demands.filter((x) => x.id !== d.id);
-    s.bugs += d.reward;
-    s.lifetime += d.reward;
-    s.demandBugs += d.reward;
+    gainBugs(d.reward, 'demandBugs');
     s.demandsFilled++;
     s.streak++;
     if (s.streak > s.bestStreak) s.bestStreak = s.streak;
@@ -476,6 +538,31 @@
     });
   }
 
+  /**
+   * Sell surplus to the Queen at a poor rate. Deliberately much worse than
+   * filling an order, so it is a valve rather than a strategy, but it means a
+   * brimming silo is never a dead end.
+   */
+  function titheValue(id) {
+    const r = RESOURCE[id];
+    const amount = Math.min(s.stocks[id], caps()[id] * D.TUNING.titheShare);
+    return {
+      amount,
+      bugs: Math.floor(Math.pow(amount, 0.85) * r.value * D.TUNING.tithePay * upgradeSets().queen),
+    };
+  }
+
+  function tithe(id) {
+    if (!RESOURCE[id]) return null;
+    const t = titheValue(id);
+    if (t.amount <= 0.5 || t.bugs <= 0) return null;
+    s.stocks[id] -= t.amount;
+    gainBugs(t.bugs, 'titheBugs');
+    s.tithes++;
+    emit('tithe', { res: id, amount: t.amount, bugs: t.bugs });
+    return t;
+  }
+
   /* ================================================================== *
    * visitors and weather
    * ================================================================== */
@@ -492,7 +579,7 @@
     const c = caps();
     const given = {};
     D.RESOURCES.forEach(function (r) {
-      const amount = Math.max(r.tier === 0 ? 25 : 8, (rates[r.id] || 0) * scale);
+      const amount = Math.max(r.tier === 0 ? 30 : 10, (rates[r.id] || 0) * scale);
       const before = s.stocks[r.id];
       s.stocks[r.id] = Math.min(c[r.id], before + amount);
       const got = s.stocks[r.id] - before;
@@ -505,13 +592,9 @@
     s.goldens++;
     const boon = rollBoon();
     const out = { boon };
-    if (boon.cache) {
-      out.given = grantCache(45);
-    } else if (boon.tribute) {
-      const gift = Math.max(bps() * 70, s.bugs * 0.06, 40);
-      s.bugs += gift; s.lifetime += gift;
-      out.gift = gift;
-    } else {
+    if (boon.cache) out.given = grantCache(45);
+    else if (boon.tribute) out.gift = gainBugs(Math.max(bps() * 70, s.bugs * 0.05, 25), 'demandBugs');
+    else {
       s.boons.push({
         id: boon.id, name: boon.name, raw: boon.raw, all: boon.all,
         endsAt: nowMs() + boon.seconds * 1000,
@@ -531,8 +614,7 @@
   function swatWasp() {
     s.waspsSwatted++;
     const given = grantCache(22);
-    const gift = Math.max(bps() * 12, 25);
-    s.bugs += gift; s.lifetime += gift;
+    const gift = gainBugs(Math.max(bps() * 10, 15), 'demandBugs');
     emit('wasp', { swatted: true, given, gift });
     return { given, gift };
   }
@@ -544,7 +626,6 @@
       return { warded: true, given };
     }
     s.waspsMissed++;
-    // a wasp takes from the fullest silo, which is the one you could spare least
     let worst = null;
     D.RESOURCES.forEach(function (r) {
       if (!worst || s.stocks[r.id] > s.stocks[worst.id]) worst = r;
@@ -574,17 +655,17 @@
    * ================================================================== */
 
   function snapshot() {
-    let allFull = false;
-    if (last) {
-      const owned = D.BUILDINGS.filter((b) => s.owned[b.id] > 0);
-      allFull = owned.length >= 4 && owned.every((b) => (last.eff[b.id] || 0) >= 0.995);
-    }
+    const ownedList = D.BUILDINGS.filter((b) => s.owned[b.id] > 0);
+    const allFull = last && ownedList.length >= 4 &&
+      ownedList.every((b) => (last.eff[b.id] || 0) >= 0.995);
+    const allCrewed = ownedList.length >= 4 &&
+      ownedList.every((b) => staffing(b.id) >= 0.999);
     return {
       lifetime: s.lifetime, bugs: s.bugs, owned: s.owned, monuments: s.monuments,
       filled: s.filled, goldens: s.goldens, wasps: s.waspsSwatted, moths: s.moths,
       demandsFilled: s.demandsFilled, bestStreak: s.bestStreak,
       upgradeCount: Object.keys(s.upgrades).length,
-      bps: bps(), allFull,
+      bps: bps(), allFull, allCrewed, idle: idleBugs(),
     };
   }
 
@@ -619,28 +700,21 @@
       s.weather = null;
     }
 
-    // resolve the chain
     const ctx = context();
     const r = CHAIN.resolve(D, ctx, dt);
     last = r;
     s.stocks = r.stocks;
 
-    const c = ctx.caps;
     D.RESOURCES.forEach(function (res) {
       if (r.overflow[res.id] > 0) s.wasted += r.overflow[res.id];
-      if (!s.filled[res.id] && s.stocks[res.id] >= c[res.id] - 0.01) {
+      if (!s.filled[res.id] && s.stocks[res.id] >= ctx.caps[res.id] - 0.01) {
         s.filled[res.id] = true;
       }
     });
 
-    if (r.bugs > 0) {
-      s.bugs += r.bugs;
-      s.lifetime += r.bugs;
-      s.broodBugs += r.bugs;
-    }
+    if (r.bugs > 0) gainBugs(r.bugs, 'broodBugs');
     if (r.bugsRate > s.bestBps) s.bestBps = r.bugsRate;
 
-    // demands
     expireDemands();
     s.nextDemandIn -= dt;
     if (s.nextDemandIn <= 0) {
@@ -648,7 +722,6 @@
       spawnDemand();
     }
 
-    // visitors
     s.honeyIn -= dt;
     if (s.honeyIn <= 0) {
       s.honeyIn = pickIn(HONEY_EVERY) * (s.monuments.cicadaChorus ? 0.55 : 1);
@@ -665,7 +738,6 @@
       if (!s.weather) rollWeather();
     }
 
-    // goal
     const frac = s.bugs / D.GOAL;
     [0.1, 0.25, 0.5, 0.75, 0.9].forEach(function (m) {
       if (frac >= m && !s.milestones[m]) { s.milestones[m] = true; emit('milestone', m); }
@@ -688,10 +760,13 @@
    * ================================================================== */
 
   function stats() {
+    let crew = 0, need = 0;
+    D.BUILDINGS.forEach((b) => { crew += s.assigned[b.id] || 0; need += crewNeeded(b.id); });
     return {
-      bugs: s.bugs, lifetime: s.lifetime, spent: s.spent,
+      bugs: s.bugs, lifetime: s.lifetime,
       bps: bps(), bestBps: s.bestBps,
-      broodBugs: s.broodBugs, demandBugs: s.demandBugs,
+      broodBugs: s.broodBugs, demandBugs: s.demandBugs, titheBugs: s.titheBugs, tithes: s.tithes,
+      crew, crewNeed: need, idle: idleBugs(),
       forages: s.forages, foraged: s.foraged,
       demandsFilled: s.demandsFilled, demandsMissed: s.demandsMissed,
       streak: s.streak, bestStreak: s.bestStreak, streakMult: streakMult(),
@@ -725,7 +800,10 @@
     out.settings = Object.assign(base.settings, raw.settings || {});
     D.BUILDINGS.forEach((b) => {
       if (typeof out.owned[b.id] !== 'number') out.owned[b.id] = 0;
-      if (typeof out.throttle[b.id] !== 'number') out.throttle[b.id] = 1;
+      if (!out.assigned || typeof out.assigned[b.id] !== 'number') {
+        out.assigned = out.assigned || {};
+        out.assigned[b.id] = 0;
+      }
     });
     D.RESOURCES.forEach((r) => {
       if (typeof out.stocks[r.id] !== 'number') out.stocks[r.id] = 0;
@@ -736,7 +814,8 @@
     out.boons = Array.isArray(out.boons) ? out.boons.filter((b) => b && b.endsAt > nowMs()) : [];
     out.demands = Array.isArray(out.demands) ? out.demands.filter((d) => d && d.need) : [];
     if (out.weather && out.weather.endsAt <= nowMs()) out.weather = null;
-    if (D.RAW.indexOf(out.forageTarget) < 0) out.forageTarget = 'sap';
+    if (D.RAW.indexOf(out.forageTarget) < 0) out.forageTarget = 'leaf';
+    out.lifetime = out.bugs;
     return out;
   }
 
@@ -749,6 +828,7 @@
 
     if (!raw) { s = freshState(); last = CHAIN.resolve(D, context(), 0.05); return null; }
     s = migrate(raw);
+    trimAssignments();
     last = CHAIN.resolve(D, context(), 0.05);
 
     const away = Math.max(0, (nowMs() - (raw.lastSeen || nowMs())) / 1000);
@@ -757,9 +837,9 @@
   }
 
   /**
-   * Catch-up for time the tab was not running. The chain is stepped forward
-   * for real rather than approximated, because a static rate would ignore the
-   * silos filling up and going to waste.
+   * Catch-up for time the tab was not running. The chain is stepped forward for
+   * real rather than approximated, because a flat rate would ignore the silos
+   * filling up and going to waste.
    */
   function runAway(seconds) {
     const paid = Math.min(seconds, OFFLINE_CAP);
@@ -770,15 +850,12 @@
     for (let t = 0; t < paid; t += step) {
       const r = CHAIN.resolve(D, ctx, step);
       ctx.stocks = r.stocks;
-      s.bugs += r.bugs * OFFLINE_RATE;
-      s.lifetime += r.bugs * OFFLINE_RATE;
-      s.broodBugs += r.bugs * OFFLINE_RATE;
+      gainBugs(r.bugs * OFFLINE_RATE, 'broodBugs');
     }
     s.stocks = ctx.stocks;
     const gain = s.bugs - before;
     if (gain <= 0) return null;
-    // demands do not fill themselves, and the streak is long cold
-    s.streak = 0;
+    s.streak = 0;   // orders do not fill themselves
     return { away: seconds, seconds: paid, gain };
   }
 
@@ -798,6 +875,7 @@
       const raw = JSON.parse(decodeURIComponent(escape(atob(String(text).trim()))));
       if (!raw || typeof raw.bugs !== 'number') return false;
       s = migrate(raw);
+      trimAssignments();
       last = CHAIN.resolve(D, context(), 0.05);
       save();
       return true;
@@ -808,13 +886,15 @@
     on, emit,
     load, save, wipe, exportSave, importSave, runAway,
     tick, forage, setForageTarget, forageValue,
-    buyBuilding, buildingCost, buildingMax, wantQty, buildingUnlocked, setThrottle,
+    assign, setAssign, autoStaff, recallAll, crewNeeded, staffing, idleBugs,
+    buyBuilding, buildingCost, buildingMax, wantQty, buildingUnlocked,
     buyUpgrade, upgradeVisible, availableUpgrades,
     buyMonument, monumentVisible,
     deliver, demandRemaining, demandComplete, demandSlots, streakMult,
+    tithe, titheValue,
     catchHoney, catchMoth, swatWasp, waspEscaped,
-    caps, context, outputRates, bps, stats, crawlerCount, checkAwards, canPay, capBlocked,
-    buildingRates, unitRates, blockers,
+    caps, context, outputRates, bps, stats, crawlerCount, checkAwards,
+    canPay, capBlocked, buildingRates, unitRates, blockers,
     get chain() { return last; },
     get state() { return s; },
     get GOAL() { return D.GOAL; },

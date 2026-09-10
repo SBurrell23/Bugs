@@ -136,19 +136,26 @@
     const host = el.resourceBar;
     host.innerHTML = '';
     D.RESOURCES.forEach(function (r) {
-      const d = document.createElement('div');
+      const d = document.createElement('button');
+      d.type = 'button';
       d.className = 'res';
       d.dataset.id = r.id;
       d.innerHTML =
         '<span class="res-icon"></span>' +
-        '<span class="res-body">' +
-          '<span class="res-name"></span>' +
-          '<span class="res-amount"></span>' +
-          '<span class="res-rate"></span>' +
-        '</span>' +
-        '<span class="res-track"><span class="res-fill"></span></span>';
+        '<span class="res-name"></span>' +
+        '<span class="res-figs"><span class="res-amount"></span><span class="res-rate"></span></span>' +
+        '<span class="res-bar"><span class="res-fill"></span></span>' +
+        '<span class="res-tithe"></span>';
       d.querySelector('.res-icon').appendChild(S.make(r.sprite, 30));
       d.querySelector('.res-name').textContent = r.name;
+      d.addEventListener('click', function () {
+        const t = G.tithe(r.id);
+        if (!t) { A.sfx.deny(); return; }
+        A.sfx.buy();
+        const box = d.getBoundingClientRect();
+        spark(box.left + box.width / 2, box.top + 6, '+' + F.fmt(t.bugs));
+        refreshAll();
+      });
       wireTip(d, function () {
         const ch = G.chain;
         const caps = G.caps();
@@ -161,7 +168,9 @@
           'Net <b>' + signed(net) + '</b> a second.</p>' +
           '<p>Holding <b>' + F.commas(G.state.stocks[r.id]) + '</b> of <b>' +
           F.commas(caps[r.id]) + '</b>.</p>' +
-          (D.RAW.indexOf(r.id) >= 0 ? '<p class="tip-flavour">You can gather this by hand.</p>' : '');
+          (D.RAW.indexOf(r.id) >= 0 ? '<p class="tip-flavour">You can gather this by hand.</p>' : '') +
+          '<p>Click to tithe <b>' + F.fmt(G.titheValue(r.id).amount) + '</b> to the Queen for <b>' +
+          F.commas(G.titheValue(r.id).bugs) + '</b> bugs. She pays badly, but she always pays.</p>';
       });
       el['res_' + r.id] = d;
       host.appendChild(d);
@@ -184,6 +193,10 @@
       rEl.textContent = signed(net) + '/s';
       rEl.className = 'res-rate' + (net > 0.01 ? '' : net < -0.01 ? ' neg' : ' zero');
       d.querySelector('.res-fill').style.width = Math.min(100, (have / cap) * 100) + '%';
+
+      const t = G.titheValue(r.id);
+      d.querySelector('.res-tithe').textContent =
+        t.bugs > 0 ? 'tithe +' + F.fmt(t.bugs) : 'empty';
 
       d.classList.toggle('full', have >= cap - 0.5 && net > 0);
       d.classList.toggle('dry', have < cap * 0.02 && net < -0.01);
@@ -212,15 +225,22 @@
         '<div class="bld-body">' +
           '<div class="bld-top"><span class="bld-name"></span><span class="bld-own">0</span></div>' +
           '<div class="bld-io"></div>' +
-          '<div class="bld-eff"><div class="bld-eff-fill"></div></div>' +
+          '<div class="bld-eff" title="Supply"><div class="bld-eff-fill"></div></div>' +
+          '<div class="bld-crewbar" title="Crew"><div class="bld-crew-fill"></div></div>' +
           '<div class="bld-note"></div>' +
         '</div>' +
         '<div class="bld-side">' +
           '<button class="bld-buy" type="button">Build<span class="price"></span></button>' +
-          '<div class="thr" role="group" aria-label="Throttle">' +
-            '<button type="button" data-v="0" title="Stopped">0</button>' +
-            '<button type="button" data-v="0.5" title="Half rate">1/2</button>' +
-            '<button type="button" data-v="1" title="Full rate">1</button>' +
+          '<div class="crew">' +
+            '<div class="crew-fig"><span class="crew-has">0</span>' +
+              '<span class="crew-of"> / </span><span class="crew-need">0</span></div>' +
+            '<div class="crew-btns" role="group" aria-label="Crew">' +
+              '<button type="button" data-d="-10">-10</button>' +
+              '<button type="button" data-d="-1">-1</button>' +
+              '<button type="button" data-d="1">+1</button>' +
+              '<button type="button" data-d="10">+10</button>' +
+              '<button type="button" data-d="max">max</button>' +
+            '</div>' +
           '</div>' +
         '</div>';
 
@@ -239,19 +259,24 @@
         const ins = Object.keys(per.ins).map((k) => rate(per.ins[k]) + ' ' + RES[k].name.toLowerCase());
         const outs = Object.keys(per.outs).map((k) => rate(per.outs[k]) + ' ' + RES[k].name.toLowerCase());
         if (per.bugs) outs.push(rate(per.bugs) + ' bugs');
+        const nextCrew = G.crewNeeded(b.id);
         return '<div class="tip-kind">Building' + (qty > 1 ? ' x' + qty : '') + '</div>' +
           '<h4>' + b.name + '</h4>' +
           '<p class="tip-flavour">' + b.blurb + '</p>' +
           '<p>Each one ' +
             (ins.length ? 'takes <b>' + ins.join(' and ') + '</b> a second and ' : '') +
             'makes <b>' + (outs.join(' and ') || 'nothing on its own') + '</b> a second.</p>' +
+          '<p>Your ' + b.name + 's want <b>' + F.commas(nextCrew) + '</b> bugs to run at full tilt. ' +
+          'Each one you add wants more crew than the last.</p>' +
           costLine(cost);
       });
 
-      d.querySelectorAll('.thr button').forEach(function (t) {
+      d.querySelectorAll('.crew-btns button').forEach(function (t) {
         t.addEventListener('click', function () {
-          G.setThrottle(b.id, Number(t.dataset.v));
-          A.sfx.tick();
+          const moved = t.dataset.d === 'max'
+            ? G.assign(b.id, G.crewNeeded(b.id))
+            : G.assign(b.id, Number(t.dataset.d));
+          if (moved) A.sfx.tick(); else A.sfx.deny();
           refreshAll();
         });
       });
@@ -303,20 +328,30 @@
       }
       d.querySelector('.bld-io').innerHTML = parts.join('');
 
-      const fill = d.querySelector('.bld-eff-fill');
-      fill.style.width = Math.round(eff * 100) + '%';
+      d.querySelector('.bld-eff-fill').style.width = Math.round(eff * 100) + '%';
+      d.querySelector('.bld-crew-fill').style.width =
+        Math.round(G.staffing(b.id) * 100) + '%';
 
       const note = d.querySelector('.bld-note');
-      const th = st.throttle[b.id];
-      d.classList.toggle('idle', owned > 0 && th === 0);
-      d.classList.toggle('starved', owned > 0 && th > 0 && eff < 0.92);
+      const has = st.assigned[b.id] || 0;
+      const need = G.crewNeeded(b.id);
+      const staff = G.staffing(b.id);
+      d.classList.toggle('idle', owned > 0 && has === 0);
+      d.classList.toggle('starved', owned > 0 && has > 0 && eff < 0.92);
+
+      d.querySelector('.crew-has').textContent = F.fmt(has);
+      d.querySelector('.crew-need').textContent = F.fmt(need);
 
       if (owned === 0) {
         note.className = 'bld-note';
         note.textContent = 'None yet.';
-      } else if (th === 0) {
-        note.className = 'bld-note';
-        note.textContent = 'Stopped.';
+      } else if (has === 0) {
+        note.className = 'bld-note warn';
+        note.textContent = 'No crew. Put bugs on it to start.';
+      } else if (staff < 0.999) {
+        note.className = 'bld-note warn';
+        note.textContent = Math.round(staff * 100) + '% crewed' +
+          (short.length ? ', short of ' + short.map((x) => RES[x].name.toLowerCase()).join(' and ') : '');
       } else if (short.length) {
         note.className = 'bld-note warn';
         note.textContent = Math.round(eff * 100) + '% - short of ' +
@@ -336,8 +371,12 @@
       buy.childNodes[0].nodeValue = qty > 1 ? 'Build x' + qty : 'Build';
       buy.querySelector('.price').textContent = costText(cost);
 
-      d.querySelectorAll('.thr button').forEach(function (t) {
-        t.classList.toggle('on', Number(t.dataset.v) === th);
+      const idle = G.idleBugs();
+      d.querySelectorAll('.crew-btns button').forEach(function (t) {
+        const v = t.dataset.d;
+        t.disabled = owned === 0 || (v === 'max'
+          ? (has >= need || idle <= 0)
+          : Number(v) > 0 ? (idle <= 0 || has >= need) : has <= 0);
       });
     });
   }
@@ -577,6 +616,9 @@
       ['Best per second', rate(t.bestBps)],
       ['From the brood', total ? Math.round(t.broodBugs / total * 100) + '%' : '0%'],
       ['From the Queen', total ? Math.round(t.demandBugs / total * 100) + '%' : '0%'],
+      ['From tithes', total ? Math.round(t.titheBugs / (total + t.titheBugs) * 100) + '%' : '0%'],
+      ['Bugs at work', F.commas(t.crew) + ' / ' + F.commas(t.crewNeed)],
+      ['Idle bugs', F.commas(t.idle)],
       ['Demands filled', F.commas(t.demandsFilled)],
       ['Demands missed', F.commas(t.demandsMissed)],
       ['Best streak', F.commas(t.bestStreak)],
@@ -605,6 +647,8 @@
     el.bugCount.textContent = bugText(st.bugs);
     el.bugWord.textContent = Math.floor(st.bugs) === 1 ? 'bug' : 'bugs';
     el.bps.textContent = rate(G.bps());
+    el.idleCount.textContent = F.commas(G.idleBugs());
+    el.crewCount.textContent = F.commas(Math.max(0, Math.floor(st.bugs) - G.idleBugs()));
     el.clickValue.textContent = rate(G.forageValue()) + ' ' + RES[st.forageTarget].name.toLowerCase();
 
     const frac = Math.min(1, st.bugs / D.GOAL);
@@ -870,6 +914,7 @@
     [
       'brand-bug', 'goal-fill', 'goal-figures', 'bug-count', 'bug-word', 'bps',
       'click-value', 'hero-btn', 'hero-img', 'forage-pick', 'status-strip', 'feed',
+      'idle-count', 'crew-count', 'autostaff-btn', 'recall-btn',
       'resource-bar', 'building-list', 'demand-list', 'streak-chip',
       'upgrade-grid', 'upgrades-empty', 'monument-list', 'award-grid', 'stats-body',
       'panel-stats', 'badge-upgrades', 'badge-monuments', 'badge-awards',
@@ -913,6 +958,18 @@
       A.setSfx(next);
       syncAudioChips();
       if (next) A.sfx.tick();
+    });
+
+    el.autostaffBtn.addEventListener('click', function () {
+      const n = G.autoStaff();
+      if (n) { A.sfx.buy(); addFeed('Sent <b>' + F.commas(n) + '</b> idle bugs to work.'); }
+      else A.sfx.deny();
+      refreshAll();
+    });
+    el.recallBtn.addEventListener('click', function () {
+      const n = G.recallAll();
+      if (n) { A.sfx.tick(); addFeed('Called <b>' + F.commas(n) + '</b> bugs off the job.'); }
+      refreshAll();
     });
 
     el.victoryBtn.addEventListener('click', function () { el.victory.hidden = true; });
@@ -972,6 +1029,10 @@
       A.sfx.monument();
       toast(m.name + ' raised', m.effect, m.sprite);
       addFeed('<b>' + m.name + '</b> stands. ' + m.extra, 'good');
+    });
+    G.on('tithe', function (e) {
+      addFeed('Tithed <b>' + F.fmt(e.amount) + ' ' + RES[e.res].name.toLowerCase() +
+        '</b> for <b>' + F.commas(e.bugs) + '</b> bugs.');
     });
     G.on('demandNew', function (d) {
       A.sfx.demandNew();

@@ -54,6 +54,15 @@
         <div id="bug-count">0</div>
         <div id="bug-word">bugs</div>
         <div id="bps-line"><span id="bps">0</span> hatching per second</div>
+        <div id="crew-line">
+          <span id="idle-count">0</span> idle
+          <span class="crew-sep">/</span>
+          <span id="crew-count">0</span> at work
+        </div>
+        <div id="crew-actions">
+          <button id="autostaff-btn" class="mini" type="button">Auto-assign</button>
+          <button id="recall-btn" class="mini" type="button">Recall all</button>
+        </div>
       </div>
 
       <div id="log-stage" class="card">
@@ -87,8 +96,9 @@
         </div>
       </div>
       <p class="panel-hint">
-        Each building eats what the one above it makes. A building runs at the
-        rate of its worst-supplied ingredient, so watch for anything going red.
+        Bugs are your workforce. Every building needs a crew, and a half-crewed
+        building works at half speed. Each also eats what the building above it
+        makes, and runs at the rate of its worst-supplied ingredient.
       </p>
       <div id="building-list"></div>
     </section>

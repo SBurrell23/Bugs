@@ -1,8 +1,10 @@
 # BUGS
 
-A production-chain game about a rotting log. Tap sap and cut leaf, refine them
-through six interlocking resources, keep the whole chain fed, and fill the
-Queen's orders until you are holding **one million bugs** at once.
+A production-chain game about a rotting log. Bugs are your **workforce**, not
+your wallet: you never spend one, you assign it. Tap sap and cut leaf, refine
+them through six interlocking resources, keep every crew staffed and every
+building fed, and fill the Queen's orders until the colony is **one million
+bugs** strong.
 
 Vanilla JavaScript. No frameworks, no build step, no dependencies.
 
@@ -27,15 +29,26 @@ buy an efficiency upgrade.
 The graph is a DAG, so the chain can stall but never deadlock: the two raw
 harvesters take no inputs and always run.
 
+### Bugs are labour
+
+Every building needs a **crew**, and a half-crewed building works at half speed.
+Bugs are never spent, so the population counter only ever climbs — but crew
+demand climbs geometrically with how many of a building you own, the same way
+its resource cost does, so labour stays scarce instead of going free once the
+population takes off.
+
+Moving bugs between jobs is free and instant. It is the main thing you do.
+
 ### The levers
 
 | Lever | What it does |
 |---|---|
-| **Building counts** | The main dial. Getting the ratios right is the game. |
-| **Throttles** | Every building runs at 0, half or full. Choke one branch to feed another. |
+| **Crew assignment** | The main dial. Every bug on the sap tap is a bug not in the brood. |
+| **Building counts** | Getting the ratios right is the other half of the game. |
 | **Silo caps** | Anything produced past the brim is **thrown away**. Overproduction is a real cost. |
 | **Foraging** | Gather sap or leaf by hand to plug a gap or finish an order. |
-| **Thrift upgrades** | Make a building eat less, which rewrites the ratios you just balanced. |
+| **Tithing** | Click any silo to sell surplus to the Queen at a poor rate. A full store is never a dead end. |
+| **Hands / thrift upgrades** | Need less crew, or eat less input — both rewrite the ratios you just balanced. |
 
 ### The Queen
 
@@ -71,9 +84,12 @@ Five profiles, over three seeds:
 
 ```
 seed        normal   brood%   mon  buildings              endBps  idleGap    afk       sloppy
-4242        68m26s     51%   3/3  34/29/23/19/18/22/43      2.7k    3m25s    never      91m41s
-8080        69m13s     54%   3/3  36/30/22/19/24/18/42      2.6k    2m29s    never     115m11s
-20260909    66m02s     52%   3/3  32/24/22/19/21/21/43      2.7k    3m46s    never     102m08s
+4242        51m57s     52%   2/3  14/12/7/6/7/5/8          748.8    3m07s    never      61m01s
+8080        84m39s     46%   2/3  11/12/8/6/8/5/8          374.4   10m02s    never      44m53s
+20260909    52m49s     61%   2/3  14/16/8/7/8/6/11          1.0k    3m24s    never      51m32s
+
+mean normal run: 63m08s   (spread 51m57s to 84m39s)
+random building takes 89% as long as building to ratio
 ```
 
 - **normal** finishes in about an hour, which is the target.
@@ -81,23 +97,33 @@ seed        normal   brood%   mon  buildings              endBps  idleGap    afk
   orders. It sits near 50%, so neither system is decoration.
 - **afk** never finishes, at any timescale. It misses every order and dies at
   one Sap Tapper. That is the design working.
-- **sloppy** buys by gut feel instead of by ratio. It still wins, but takes
-  40-70% longer and throws away millions of resources to overflow. Bad
-  balancing is punished, not fatal.
+- **sloppy** buys by gut feel instead of by ratio. It is **not reliably
+  slower**, and the gate prints that rather than hiding it. Crews make
+  over-building self-limiting — a building nobody staffs simply sits idle — so
+  a random builder wastes resources without wrecking the run. Over-building
+  should cost more than it currently does; that is the next thing to fix.
 
 `check-balance.js` asserts all of that plus a static check that no cost can
 ever exceed what a silo is able to hold, and it gates every deploy.
 
-### Two bugs that check caught
+### What the checks caught
 
-Both were invisible in play and obvious in the numbers:
+All of these were invisible in play and obvious in the numbers:
 
-- The Hive Singularity wanted 1,400 wax when the largest possible wax store
-  held 950. It was simply unbuyable.
-- Resource costs grew at the same rate as bug costs, so Brood Chamber #20
-  needed more wax than could physically be stored. Every profile stopped at
-  exactly 19 — a wall, not a choice. Resource costs now climb gently and are
-  clamped to half the current silo, so they gate without ever blocking.
+- **The boredom metric.** A player reported sitting with maxed sap and leaf and
+  nothing to do. The old metric measured time between purchases, which never
+  catches "silos full, waiting on the Queen". Tracing the opening showed seven
+  minutes where nothing at all was affordable. The gate now measures the real
+  thing: raw silos brimming, nothing buyable, no order fillable, and nowhere
+  left to put a bug.
+- **Costs that outran storage.** The Hive Singularity once wanted 1,400 wax
+  when the largest possible wax store held 950. Every static cost is now
+  asserted against maximum silo capacity, including the silo upgrades
+  themselves — a store upgrade you cannot afford with the store you have is a
+  dead end.
+- **A payout exploit.** Orders are sized against your output, so spamming the
+  cheapest producer inflated your own rewards. Payouts are now sub-linear in
+  quantity and the value ladder is much steeper toward the refined resources.
 
 ---
 
@@ -173,3 +199,12 @@ Progress is kept in `localStorage` and saved every ten seconds. Time away runs
 the chain forward for real at 40% for at most 15 minutes — orders are never
 filled while you are gone, and the streak is cold when you come back. This is
 not an idle game.
+
+## Known rough edges
+
+- Run length swings a fair way with order luck: 52 to 85 minutes across seeds,
+  mean 63. Tightening that means making order rewards depend less on chance.
+- Over-building is under-punished (see above). Crews absorb the mistake too
+  gracefully.
+- Late game the population far exceeds the number of jobs, so crew assignment
+  stops biting once you are past a few hundred thousand bugs.
